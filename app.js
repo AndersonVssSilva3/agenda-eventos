@@ -30,6 +30,55 @@ function toast(msg) {
   setTimeout(() => t.classList.remove('show'), 3500);
 }
 
+/* ---------- Manejo del Tema (Claro/Oscuro/Sistema) ---------- */
+const btnTheme = $('#btn-theme');
+const temas = ['light', 'dark', 'system'];
+let temaActual = localStorage.getItem('tema') || 'system';
+// Reloj en vivo
+function updateClock() {
+  const clockEl = $('#live-clock');
+  if (clockEl) {
+    const now = new Date();
+    const options = { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' };
+    clockEl.textContent = now.toLocaleDateString('es-ES', options).replace(',', ' •');
+  }
+}
+setInterval(updateClock, 1000);
+updateClock();
+function aplicarTema() {
+  const body = document.body;
+  body.classList.remove('dark-theme');
+  
+  if (temaActual === 'dark') {
+    body.classList.add('dark-theme');
+    if(btnTheme) btnTheme.textContent = '🌙';
+  } else if (temaActual === 'light') {
+    if(btnTheme) btnTheme.textContent = '☀️';
+  } else {
+    // Modo sistema
+    const isDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+    if (isDark) body.classList.add('dark-theme');
+    if(btnTheme) btnTheme.textContent = '💻';
+  }
+}
+
+if(btnTheme) {
+  btnTheme.addEventListener('click', () => {
+    let idx = temas.indexOf(temaActual);
+    temaActual = temas[(idx + 1) % temas.length];
+    localStorage.setItem('tema', temaActual);
+    aplicarTema();
+  });
+}
+
+window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+  if (temaActual === 'system') aplicarTema();
+});
+
+// Inicializar tema
+aplicarTema();
+
+
 /* ---------- Service worker ---------- */
 if ('serviceWorker' in navigator) {
   navigator.serviceWorker.register('./sw.js').catch(console.error);
@@ -95,11 +144,9 @@ function passesFilter(ev) {
 }
 
 /* ---------- Render ---------- */
-/* ---------- Estado de vista ---------- */
 let mesActual = new Date();
 let diaSeleccionado = ymd(new Date());
 
-/* ---------- Render ---------- */
 function labelDia(dateStr) {
   const hoy = ymd(new Date());
   const manana = ymd(addDays(new Date(), 1));
@@ -114,16 +161,47 @@ function eventsOn(dateStr) {
   ).sort((a, b) => a.start_time.localeCompare(b.start_time));
 }
 
-function cardHTML(ev) {
+function cardHTML(ev, isTimeline = false) {
   const files = ev.files || [];
   const imgs = files.filter((f) => f.type?.startsWith('image/') && urlMap[f.path]);
   const docs = files.filter((f) => !(f.type?.startsWith('image/')) && urlMap[f.path]);
   const horas = hhmm(ev.start_time) + (ev.end_time ? ` – ${hhmm(ev.end_time)}` : '');
+  
+  // Calcular si el evento está en curso o ya pasó (solo si es para hoy)
+  let statusClass = '';
+  let statusLabel = '';
+  const now = new Date();
+  const todayStr = ymd(now);
+  
+  // Solo calculamos el estado si estamos en la vista de Hoy
+  if (isTimeline) {
+    const start = new Date(`${ev.event_date}T${ev.start_time}`);
+    let end;
+    if (ev.end_time) {
+      end = new Date(`${ev.event_date}T${ev.end_time}`);
+    } else {
+      end = new Date(start.getTime() + 60 * 60 * 1000); // Si no hay fin, asume 1 hora
+    }
+    
+    if (ev.event_date === todayStr) {
+      if (now >= start && now <= end) {
+        statusClass = 'live';
+        statusLabel = '<span class="live-badge">🔴 EN CURSO</span>';
+      } else if (now > end) {
+        statusClass = 'past';
+        statusLabel = '<span class="past-badge">✓ FINALIZADO</span>';
+      }
+    }
+  }
+
   return `
-  <article class="ev ${esc(ev.kind)}">
+  <article class="ev ${esc(ev.kind)} ${statusClass}">
     <div class="ev-head">
       <div style="flex:1">
-        <span class="ev-badge ${esc(ev.kind)}">${ICONO[ev.kind] || ''} ${esc(ev.kind)}</span>
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <span class="ev-badge ${esc(ev.kind)}">${ICONO[ev.kind] || ''} ${esc(ev.kind)}</span>
+          ${statusLabel}
+        </div>
         <div class="ev-title">${esc(ev.title)}</div>
         <div class="ev-meta">🕒 ${esc(horas)} ${ev.recurring_weekday != null ? ' · 🔁 semanal' : ''}</div>
         ${ev.location ? `<div class="ev-meta">📍 ${esc(ev.location)}</div>` : ''}
@@ -141,7 +219,6 @@ function cardHTML(ev) {
   </article>`;
 }
 
-/* Timeline del día (vista "Hoy") */
 function timelineHTML(dateStr) {
   const list = eventsOn(dateStr);
   if (!list.length) return '<div class="empty">Nada para este día.<br>Toca ＋ para agregar algo.</div>';
@@ -151,8 +228,7 @@ function timelineHTML(dateStr) {
     html += `
       <div class="tl-item">
         <div class="tl-time">${hhmm(ev.start_time)}${dur ? `<small>${dur}</small>` : ''}</div>
-        <div class="tl-dot ${esc(ev.kind)}"></div>
-        <div>${cardHTML(ev)}</div>
+        <div>${cardHTML(ev, true)}</div>
       </div>`;
   }
   return html;
@@ -170,7 +246,6 @@ function renderAgenda() {
     html += `<div class="timeline" style="margin-top:1.5rem"><div class="day-title">➡️ Mañana · ${labelDia(manana)}</div>${timelineHTML(manana)}</div>`;
   }
 
-  // Próximos 7 días (resumen)
   const proximos = [];
   for (let i = 2; i <= 7; i++) {
     const d = ymd(addDays(new Date(), i));
@@ -189,7 +264,6 @@ function renderAgenda() {
   $('#agenda-list').innerHTML = html || '<div class="empty">Sin eventos próximos.</div>';
 }
 
-/* Vista mes */
 function renderCalendar() {
   const y = mesActual.getFullYear();
   const m = mesActual.getMonth();
@@ -230,10 +304,9 @@ function renderCalendar() {
 
   $('#calendar').innerHTML = html;
 
-  // Detalle del día seleccionado
   const detalle = eventsOn(diaSeleccionado);
   $('#day-detail').innerHTML = `
-    <h3>${esc(labelDia(diaSeleccionado))}</h3>
+    <h3 style="margin: 1rem 0 .5rem; text-transform: capitalize;">${esc(labelDia(diaSeleccionado))}</h3>
     ${detalle.length ? detalle.map((ev) => cardHTML(ev)).join('') : '<div class="empty">Día sin eventos.</div>'}
   `;
 }
@@ -248,7 +321,7 @@ function renderSchedule() {
   for (const wd of [1, 2, 3, 4, 5, 6, 0]) {
     const list = rec.filter((e) => e.recurring_weekday === wd).sort((a, b) => a.start_time.localeCompare(b.start_time));
     if (!list.length) continue;
-    html += `<div class="sched-day"><h3>${DIAS[wd]}</h3>${list.map((e) => cardHTML(e)).join('')}</div>`;
+    html += `<div class="sched-day"><h3 style="margin: 1rem 0 .5rem;">${DIAS[wd]}</h3>${list.map((e) => cardHTML(e)).join('')}</div>`;
   }
   $('#schedule').innerHTML = html;
 }
@@ -259,9 +332,6 @@ function render() {
   renderSchedule();
 }
 
-
-
-/* ---------- Pestañas / filtros ---------- */
 /* ---------- Pestañas / filtros ---------- */
 document.querySelectorAll('.nav-item[data-tab]').forEach((b) => b.addEventListener('click', () => {
   document.querySelectorAll('.nav-item[data-tab]').forEach((x) => x.classList.toggle('active', x === b));
@@ -269,13 +339,13 @@ document.querySelectorAll('.nav-item[data-tab]').forEach((b) => b.addEventListen
   $('#tab-mes').classList.toggle('hidden', b.dataset.tab !== 'mes');
   $('#tab-horario').classList.toggle('hidden', b.dataset.tab !== 'horario');
 }));
+
 $('#fab-nav').addEventListener('click', () => openForm());
 $('#search').addEventListener('input', (e) => { busqueda = e.target.value.trim().toLowerCase(); render(); });
 $('#filter-kind').addEventListener('change', (e) => { filtroTipo = e.target.value; render(); });
 $('#prev-month').addEventListener('click', () => { mesActual = new Date(mesActual.getFullYear(), mesActual.getMonth() - 1, 1); renderCalendar(); });
 $('#next-month').addEventListener('click', () => { mesActual = new Date(mesActual.getFullYear(), mesActual.getMonth() + 1, 1); renderCalendar(); });
 
-// Click en un día del calendario
 $('#calendar').addEventListener('click', (e) => {
   const cell = e.target.closest('.cal-day[data-date]');
   if (!cell) return;
@@ -317,7 +387,6 @@ function openForm(ev = null) {
   dlg.showModal();
 }
 
-
 $('#btn-cancel').addEventListener('click', () => dlg.close());
 $('#existing-files').addEventListener('click', (e) => {
   const i = e.target.dataset.rm;
@@ -327,7 +396,6 @@ $('#existing-files').addEventListener('click', (e) => {
   renderExistingFiles();
 });
 
-// Si eligen "Clase", sugerir repetición semanal
 form.elements.kind.addEventListener('change', (e) => {
   if (e.target.value === 'clase') form.elements.repeat.checked = true;
 });
@@ -384,7 +452,6 @@ form.addEventListener('submit', async (e) => {
   }
 });
 
-/* ---------- Editar / eliminar ---------- */
 document.addEventListener('click', async (e) => {
   const editId = e.target.dataset?.edit;
   const delId = e.target.dataset?.del;
@@ -416,7 +483,6 @@ $('#btn-push').addEventListener('click', async () => {
     const perm = await Notification.requestPermission();
     if (perm !== 'granted') return toast('Permiso de notificaciones denegado.');
 
-    // Validación de la VAPID key
     if (!VAPID_PUBLIC_KEY || VAPID_PUBLIC_KEY.length < 80 || VAPID_PUBLIC_KEY.startsWith('sb_')) {
       return toast('⚠️ Configura una VAPID_PUBLIC_KEY válida en config.js');
     }

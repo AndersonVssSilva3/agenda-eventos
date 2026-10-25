@@ -3,25 +3,27 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Mi Agenda</title>
+  <title>Mi Agenda Pro</title>
   <meta name="theme-color" content="#4f46e5">
   <link rel="manifest" href="manifest.webmanifest">
   <link rel="icon" href="icon-192.png">
   <link rel="apple-touch-icon" href="icon-192.png">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="mobile-web-app-capable" content="yes">
+  <!-- Fuente moderna para un look profesional -->
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="styles.css">
 </head>
 <body>
 
   <!-- LOGIN -->
   <main id="view-auth" class="auth hidden">
-    <div class="brand">📅</div>
+    <div class="brand glass">📅</div>
     <h1>Mi Agenda</h1>
-    <p class="muted">Tus eventos, clases y citas en un solo lugar.</p>
-    <form id="auth-form" class="card stack">
+    <p class="muted">Organiza tu vida de forma increíble.</p>
+    <form id="auth-form" class="card glass stack">
       <input type="email" name="email" placeholder="Correo" required autocomplete="email">
-      <input type="password" name="password" placeholder="Contraseña (mín. 6 caracteres)" required minlength="6" autocomplete="current-password">
+      <input type="password" name="password" placeholder="Contraseña" required minlength="6" autocomplete="current-password">
       <button class="btn primary" data-mode="login">Entrar</button>
       <button class="btn ghost" data-mode="signup" formnovalidate>Crear cuenta</button>
     </form>
@@ -29,12 +31,17 @@
 
   <!-- APP -->
   <div id="view-app" class="hidden">
-    <header class="topbar">
+    <header class="topbar glass">
       <div class="brand-row">
         <span class="brand-icon">📅</span>
-        <h1>Mi Agenda</h1>
+        <div>
+          <h1>Mi Agenda</h1>
+          <!-- Reloj en vivo -->
+          <div id="live-clock" style="font-size: 0.75rem; color: var(--text-muted); font-weight: 600;"></div>
+        </div>
       </div>
       <div class="row">
+        <button id="btn-theme" class="icon-btn" title="Cambiar tema">🌙</button>
         <button id="btn-push" class="icon-btn" title="Activar notificaciones">🔔</button>
         <button id="btn-logout" class="icon-btn" title="Salir">⎋</button>
       </div>
@@ -57,7 +64,7 @@
 
       <!-- PESTAÑA: MES -->
       <section id="tab-mes" class="hidden">
-        <div class="month-header">
+        <div class="month-header glass">
           <button class="icon-btn" id="prev-month">‹</button>
           <h2 id="month-title">Mes</h2>
           <button class="icon-btn" id="next-month">›</button>
@@ -65,7 +72,7 @@
         <div class="weekdays">
           <span>L</span><span>M</span><span>X</span><span>J</span><span>V</span><span>S</span><span>D</span>
         </div>
-        <div id="calendar" class="calendar"></div>
+        <div id="calendar" class="calendar glass"></div>
         <div id="day-detail" class="day-detail"></div>
       </section>
 
@@ -75,8 +82,8 @@
       </section>
     </main>
 
-    <!-- Bottom nav -->
-    <nav class="bottom-nav">
+    <!-- Bottom nav flotante -->
+    <nav class="bottom-nav glass">
       <button class="nav-item active" data-tab="hoy">
         <span class="nav-ico">📋</span><span>Hoy</span>
       </button>
@@ -87,13 +94,13 @@
         <span class="nav-ico">🔁</span><span>Horario</span>
       </button>
       <button class="nav-item" id="fab-nav">
-        <span class="nav-ico fab-ico">＋</span><span>Nuevo</span>
+        <span class="nav-ico fab-ico">＋</span>
       </button>
     </nav>
   </div>
 
   <!-- FORMULARIO -->
-  <dialog id="dlg">
+  <dialog id="dlg" class="glass">
     <form id="event-form" class="stack">
       <h2 id="dlg-title">Nuevo evento</h2>
       <input type="hidden" name="event_id">
