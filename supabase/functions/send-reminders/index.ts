@@ -24,6 +24,18 @@ function localDay(dayOffset: number) {
   };
 }
 
+// Misma lógica que en app.js
+function occursOn(ev: any, date: string, weekday: number) {
+  if (date < ev.event_date) return false;
+  if (ev.end_date && date > ev.end_date) return false;
+  const wds: number[] | null = Array.isArray(ev.weekdays) && ev.weekdays.length
+    ? ev.weekdays
+    : ev.recurring_weekday != null ? [ev.recurring_weekday] : null;
+  if (wds) return wds.includes(weekday);
+  if (ev.end_date) return true;
+  return date === ev.event_date;
+}
+
 Deno.serve(async (req) => {
   if (req.headers.get("x-cron-secret") !== Deno.env.get("CRON_SECRET")) {
     return new Response("forbidden", { status: 403 });
@@ -31,13 +43,14 @@ Deno.serve(async (req) => {
 
   const days = [localDay(0), localDay(1)];
   const dates = days.map((d) => d.date);
-  const weekdays = days.map((d) => d.weekday);
 
+  // Candidatos: eventos que pueden ocurrir hoy o mañana
   const { data: events, error } = await sb
     .from("events")
     .select("*")
     .gte("remind_minutes", 0)
-    .or(`event_date.in.(${dates.join(",")}),recurring_weekday.in.(${weekdays.join(",")})`);
+    .lte("event_date", dates[1])
+    .or(`event_date.gte.${dates[0]},end_date.gte.${dates[0]},and(end_date.is.null,weekdays.not.is.null),recurring_weekday.not.is.null`);
 
   if (error) return new Response(error.message, { status: 500 });
 
@@ -46,9 +59,7 @@ Deno.serve(async (req) => {
 
   for (const ev of events ?? []) {
     for (const day of days) {
-      const applies = ev.recurring_weekday == null
-        ? ev.event_date === day.date
-        : ev.recurring_weekday === day.weekday && day.date >= ev.event_date;
+      const applies = occursOn(ev, day.date, day.weekday);
       if (!applies) continue;
 
       const start = new Date(`${day.date}T${String(ev.start_time).slice(0, 8)}${offsetStr}`).getTime();
@@ -67,13 +78,18 @@ Deno.serve(async (req) => {
       const mins = Math.max(0, Math.round(diff / 60000));
       const body = `${String(ev.start_time).slice(0, 5)}${ev.location ? " · " + ev.location : ""}` +
         (mins > 0 ? ` (en ${mins >= 120 ? Math.round(mins / 60) + " h" : mins + " min"})` : " (ahora)");
-      const payload = JSON.stringify({ title: ev.title, body, url: "./" });
+      const payload = JSON.stringify({ title: ev.title, body, url: "./", tag: `${ev.id}-${day.date}` });
 
       let ok = 0;
       for (const s of subs) {
         attempted++;
         try {
-          await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload);
+          await webpush.sendNotification(
+            { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
+            payload,
+            // urgency "high": el teléfono despierta y la muestra al instante (sin esperar por ahorro de batería)
+            { urgency: "high", TTL: 60 * 60 },
+          );
           ok++; sent++;
         } catch (err: any) {
           if (err.statusCode === 404 || err.statusCode === 410) {

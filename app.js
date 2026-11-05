@@ -121,17 +121,35 @@ async function load() {
   render();
 }
 
-/* ---------- Ocurrencias (eventos únicos y semanales) ---------- */
-function occurrences(ev, from, days) {
-  const start = parseYmd(ev.event_date);
-  const end = addDays(from, days);
-  if (ev.recurring_weekday == null) return start >= from && start <= end ? [ymd(start)] : [];
-  const out = [];
-  for (let i = 0; i <= days; i++) {
-    const d = addDays(from, i);
-    if (d.getDay() === ev.recurring_weekday && d >= start) out.push(ymd(d));
-  }
-  return out;
+/* ---------- Ocurrencias (un día, rango diario o días de la semana) ---------- */
+const DIAS_CORTO = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
+const TODOS_LOS_DIAS = [0, 1, 2, 3, 4, 5, 6];
+
+// Días de la semana en que se repite (null = no se repite por día de semana)
+function evWeekdays(ev) {
+  if (Array.isArray(ev.weekdays) && ev.weekdays.length) return ev.weekdays;
+  if (ev.recurring_weekday != null) return [ev.recurring_weekday]; // formato antiguo
+  return null;
+}
+const isRecurring = (ev) => evWeekdays(ev) != null || !!ev.end_date;
+
+function occursOn(ev, dateStr) {
+  if (dateStr < ev.event_date) return false;
+  if (ev.end_date && dateStr > ev.end_date) return false;
+  const wds = evWeekdays(ev);
+  if (wds) return wds.includes(parseYmd(dateStr).getDay());
+  if (ev.end_date) return true;          // rango sin días elegidos = todos los días
+  return dateStr === ev.event_date;      // evento de un solo día
+}
+
+const fmtCorto = (s) => parseYmd(s).toLocaleDateString('es', { day: 'numeric', month: 'short' });
+
+function recurrenceLabel(ev) {
+  const wds = evWeekdays(ev);
+  const hasta = ev.end_date ? ` · hasta ${fmtCorto(ev.end_date)}` : '';
+  if (!wds) return ev.end_date ? `📆 ${fmtCorto(ev.event_date)} → ${fmtCorto(ev.end_date)}` : '';
+  if (wds.length === 7) return `🔁 Todos los días${hasta}`;
+  return `🔁 ${[1, 2, 3, 4, 5, 6, 0].filter((d) => wds.includes(d)).map((d) => DIAS_CORTO[d]).join(' ')}${hasta}`;
 }
 
 function passesFilter(ev) {
@@ -156,12 +174,10 @@ function labelDia(dateStr) {
 }
 
 function eventsOn(dateStr) {
-  return events.filter(passesFilter).filter((ev) =>
-    occurrences(ev, parseYmd(dateStr), 0).includes(dateStr)
-  ).sort((a, b) => a.start_time.localeCompare(b.start_time));
+  return events.filter(passesFilter).filter((ev) => occursOn(ev, dateStr)).sort((a, b) => a.start_time.localeCompare(b.start_time));
 }
 
-function cardHTML(ev, isTimeline = false) {
+function cardHTML(ev, dateStr = null) {
   const files = ev.files || [];
   const imgs = files.filter((f) => f.type?.startsWith('image/') && urlMap[f.path]);
   const docs = files.filter((f) => !(f.type?.startsWith('image/')) && urlMap[f.path]);
@@ -174,16 +190,16 @@ function cardHTML(ev, isTimeline = false) {
   const todayStr = ymd(now);
   
   // Solo calculamos el estado si estamos en la vista de Hoy
-  if (isTimeline) {
-    const start = new Date(`${ev.event_date}T${ev.start_time}`);
+  if (dateStr) {
+    const start = new Date(`${dateStr}T${ev.start_time}`);
     let end;
     if (ev.end_time) {
-      end = new Date(`${ev.event_date}T${ev.end_time}`);
+      end = new Date(`${dateStr}T${ev.end_time}`);
     } else {
       end = new Date(start.getTime() + 60 * 60 * 1000); // Si no hay fin, asume 1 hora
     }
     
-    if (ev.event_date === todayStr) {
+    if (dateStr === todayStr) {
       if (now >= start && now <= end) {
         statusClass = 'live';
         statusLabel = '<span class="live-badge">🔴 EN CURSO</span>';
@@ -203,7 +219,8 @@ function cardHTML(ev, isTimeline = false) {
           ${statusLabel}
         </div>
         <div class="ev-title">${esc(ev.title)}</div>
-        <div class="ev-meta">🕒 ${esc(horas)} ${ev.recurring_weekday != null ? ' · 🔁 semanal' : ''}</div>
+        <div class="ev-meta">🕒 ${esc(horas)}</div>
+        ${isRecurring(ev) ? `<div class="ev-meta">${esc(recurrenceLabel(ev))}</div>` : ''}
         ${ev.location ? `<div class="ev-meta">📍 ${esc(ev.location)}</div>` : ''}
         ${ev.remind_minutes >= 0 ? `<div class="ev-meta">🔔 ${ev.remind_minutes === 0 ? 'A la hora' : ev.remind_minutes >= 1440 ? '1 día antes' : ev.remind_minutes + ' min antes'}</div>` : ''}
       </div>
@@ -228,7 +245,7 @@ function timelineHTML(dateStr) {
     html += `
       <div class="tl-item">
         <div class="tl-time">${hhmm(ev.start_time)}${dur ? `<small>${dur}</small>` : ''}</div>
-        <div>${cardHTML(ev, true)}</div>
+        <div>${cardHTML(ev, dateStr)}</div>
       </div>`;
   }
   return html;
@@ -312,14 +329,15 @@ function renderCalendar() {
 }
 
 function renderSchedule() {
-  const rec = events.filter((e) => e.recurring_weekday != null);
+  const hoy = ymd(new Date());
+  const rec = events.filter((e) => isRecurring(e) && (!e.end_date || e.end_date >= hoy));
   if (!rec.length) {
-    $('#schedule').innerHTML = '<div class="empty">Aún no tienes horario semanal.<br>Crea una clase o cita y marca “Se repite cada semana”.</div>';
+    $('#schedule').innerHTML = '<div class="empty">Aún no tienes horario.<br>Crea una clase o cita y elige “Todos los días” o “Ciertos días de la semana”.</div>';
     return;
   }
   let html = '';
   for (const wd of [1, 2, 3, 4, 5, 6, 0]) {
-    const list = rec.filter((e) => e.recurring_weekday === wd).sort((a, b) => a.start_time.localeCompare(b.start_time));
+    const list = rec.filter((e) => (evWeekdays(e) || TODOS_LOS_DIAS).includes(wd)).sort((a, b) => a.start_time.localeCompare(b.start_time));
     if (!list.length) continue;
     html += `<div class="sched-day"><h3 style="margin: 1rem 0 .5rem;">${DIAS[wd]}</h3>${list.map((e) => cardHTML(e)).join('')}</div>`;
   }
@@ -362,6 +380,27 @@ function renderExistingFiles() {
     `<span class="chip">📎 ${esc(f.name)} <button type="button" data-rm="${i}" title="Quitar">×</button></span>`).join('');
 }
 
+function wdBoxes() { return [...form.querySelectorAll('input[name="wd"]')]; }
+
+function updateFreqUI() {
+  const el = form.elements;
+  const freq = el.freq.value;
+  $('#wrap-end').classList.toggle('hidden', freq === 'once');
+  $('#wrap-days').classList.toggle('hidden', freq !== 'weekly');
+  $('#lbl-start').textContent = freq === 'once' ? 'Fecha' : 'Desde';
+  // Al elegir "ciertos días", marca por defecto el día de la fecha de inicio
+  if (freq === 'weekly' && !wdBoxes().some((b) => b.checked) && el.event_date.value) {
+    const d = String(parseYmd(el.event_date.value).getDay());
+    wdBoxes().forEach((b) => { b.checked = b.value === d; });
+  }
+  el.end_date.min = el.event_date.value || '';
+  const hint = $('#freq-hint');
+  hint.classList.toggle('hidden', freq === 'once');
+  hint.textContent = freq === 'daily'
+    ? 'Se repetirá cada día a la misma hora entre las dos fechas. Sin fecha “Hasta”, se repite siempre.'
+    : 'Se repetirá en los días marcados. Sin fecha “Hasta”, se repite siempre.';
+}
+
 function openForm(ev = null) {
   form.reset();
   editingFiles = ev ? [...(ev.files || [])] : [];
@@ -376,13 +415,17 @@ function openForm(ev = null) {
     el.start_time.value = hhmm(ev.start_time);
     el.end_time.value = hhmm(ev.end_time);
     el.remind.value = String(ev.remind_minutes);
-    el.repeat.checked = ev.recurring_weekday != null;
+    const wds = evWeekdays(ev);
+    el.freq.value = wds ? (wds.length === 7 ? 'daily' : 'weekly') : (ev.end_date ? 'daily' : 'once');
+    el.end_date.value = ev.end_date || '';
+    wdBoxes().forEach((b) => { b.checked = !!wds?.includes(Number(b.value)); });
     el.lugar.value = ev.location || '';
     el.notas.value = ev.notes || '';
     el.links.value = (ev.links || []).join('\n');
   } else {
     el.event_date.value = ymd(new Date());
   }
+  updateFreqUI();
   renderExistingFiles();
   dlg.showModal();
 }
@@ -397,12 +440,27 @@ $('#existing-files').addEventListener('click', (e) => {
 });
 
 form.elements.kind.addEventListener('change', (e) => {
-  if (e.target.value === 'clase') form.elements.repeat.checked = true;
+  if (e.target.value === 'clase' && form.elements.freq.value === 'once') {
+    form.elements.freq.value = 'weekly';
+    updateFreqUI();
+  }
 });
+form.elements.freq.addEventListener('change', updateFreqUI);
+form.elements.event_date.addEventListener('change', updateFreqUI);
 
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
   const el = form.elements;
+  const freq = el.freq.value;
+  const endDate = freq === 'once' ? null : (el.end_date.value || null);
+  let weekdays = null;
+  if (freq === 'daily') weekdays = TODOS_LOS_DIAS;
+  if (freq === 'weekly') {
+    weekdays = wdBoxes().filter((b) => b.checked).map((b) => Number(b.value)).sort();
+    if (!weekdays.length) return toast('Marca al menos un día de la semana');
+  }
+  if (endDate && endDate < el.event_date.value) return toast('La fecha “Hasta” debe ser igual o posterior a la de inicio');
+
   const btn = $('#btn-save');
   btn.disabled = true; btn.textContent = 'Guardando…';
 
@@ -434,7 +492,9 @@ form.addEventListener('submit', async (e) => {
       links,
       files,
       remind_minutes: Number(el.remind.value),
-      recurring_weekday: el.repeat.checked ? parseYmd(el.event_date.value).getDay() : null,
+      end_date: endDate,
+      weekdays,
+      recurring_weekday: null, // reemplazado por "weekdays"
     };
 
     const { error } = await sb.from('events').upsert(row);
@@ -458,7 +518,7 @@ document.addEventListener('click', async (e) => {
   if (editId) return openForm(events.find((x) => x.id === editId));
   if (delId) {
     const ev = events.find((x) => x.id === delId);
-    if (!confirm(`¿Eliminar "${ev.title}"?` + (ev.recurring_weekday != null ? '\nSe borrarán todas sus repeticiones.' : ''))) return;
+    if (!confirm(`¿Eliminar "${ev.title}"?` + (isRecurring(ev) ? '\nSe borrarán todas sus repeticiones.' : ''))) return;
     const paths = (ev.files || []).map((f) => f.path);
     if (paths.length) await sb.storage.from(BUCKET).remove(paths);
     const { error } = await sb.from('events').delete().eq('id', delId);
@@ -467,6 +527,54 @@ document.addEventListener('click', async (e) => {
     load();
   }
 });
+
+/* ---------- Sonido y vibración ---------- */
+const VIBRACION = [500, 200, 500, 200, 500, 200, 500];
+let audioCtx = null;
+
+// El navegador solo deja reproducir audio después de que tocas la pantalla
+function unlockAudio() {
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  } catch { /* sin audio */ }
+}
+document.addEventListener('pointerdown', unlockAudio, { once: true });
+
+function playChime() {
+  try {
+    unlockAudio();
+    if (!audioCtx) return;
+    const t0 = audioCtx.currentTime;
+    [880, 1175, 880, 1175].forEach((freq, i) => {
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = freq;
+      const t = t0 + i * 0.35;
+      gain.gain.setValueAtTime(0.0001, t);
+      gain.gain.exponentialRampToValueAtTime(0.4, t + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start(t);
+      osc.stop(t + 0.32);
+    });
+  } catch { /* sin audio */ }
+}
+
+function alertar() {
+  playChime();
+  try { navigator.vibrate?.(VIBRACION); } catch { /* sin vibración */ }
+}
+
+// Si la app está abierta cuando llega un recordatorio, suena y vibra aquí también
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.addEventListener('message', (e) => {
+    if (e.data?.type !== 'reminder') return;
+    alertar();
+    toast(`🔔 ${e.data.title}: ${e.data.body}`);
+  });
+}
 
 /* ---------- Notificaciones push ---------- */
 function urlB64ToUint8Array(b64) {
@@ -500,7 +608,18 @@ $('#btn-push').addEventListener('click', async () => {
       { onConflict: 'endpoint' }
     );
     if (error) throw error;
-    toast('🔔 Notificaciones activadas en este dispositivo');
+    // Notificación de prueba: así sabes si tu teléfono suena/vibra
+    await reg.showNotification('🔔 Prueba de Mi Agenda', {
+      body: 'Así llegarán tus recordatorios. Si no sonó ni vibró, revisa los ajustes de notificación del teléfono.',
+      icon: './icon-192.png',
+      badge: './icon-192.png',
+      vibrate: VIBRACION,
+      silent: false,
+      tag: 'prueba',
+      renotify: true,
+    });
+    alertar();
+    toast('🔔 Notificaciones activadas. Te envié una de prueba.');
   } catch (err) {
     console.error(err);
     toast('No se pudo activar: ' + (err.message || err));

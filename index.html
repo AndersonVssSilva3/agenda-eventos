@@ -117,26 +117,48 @@
         <input name="titulo" required placeholder="Ej: Concierto, Cálculo II, Dentista">
       </label>
 
+      <label>Frecuencia
+        <select name="freq">
+          <option value="once">📌 Solo un día</option>
+          <option value="daily">📆 Todos los días (rango de fechas)</option>
+          <option value="weekly">🔁 Ciertos días de la semana</option>
+        </select>
+      </label>
+
       <div class="grid2">
-        <label>Fecha <input type="date" name="event_date" required></label>
-        <label>Hora inicio <input type="time" name="start_time" required></label>
-      </div>
-      <div class="grid2">
-        <label>Hora fin <input type="time" name="end_time"></label>
-        <label>Recordarme
-          <select name="remind">
-            <option value="-1">No</option>
-            <option value="0">A la hora</option>
-            <option value="10">10 min antes</option>
-            <option value="30" selected>30 min antes</option>
-            <option value="60">1 hora antes</option>
-            <option value="120">2 horas antes</option>
-            <option value="1440">1 día antes</option>
-          </select>
-        </label>
+        <label><span id="lbl-start">Fecha</span> <input type="date" name="event_date" required></label>
+        <label id="wrap-end" class="hidden">Hasta (opcional) <input type="date" name="end_date"></label>
       </div>
 
-      <label class="check"><input type="checkbox" name="repeat"> 🔁 Se repite cada semana (ideal para clases)</label>
+      <div id="wrap-days" class="hidden">
+        <div class="muted" style="font-size:.85rem;font-weight:500;margin-bottom:.4rem">Días</div>
+        <div class="daypicker">
+          <label class="day"><input type="checkbox" name="wd" value="1"><span>L</span></label>
+          <label class="day"><input type="checkbox" name="wd" value="2"><span>M</span></label>
+          <label class="day"><input type="checkbox" name="wd" value="3"><span>X</span></label>
+          <label class="day"><input type="checkbox" name="wd" value="4"><span>J</span></label>
+          <label class="day"><input type="checkbox" name="wd" value="5"><span>V</span></label>
+          <label class="day"><input type="checkbox" name="wd" value="6"><span>S</span></label>
+          <label class="day"><input type="checkbox" name="wd" value="0"><span>D</span></label>
+        </div>
+      </div>
+      <p id="freq-hint" class="muted hidden" style="margin:0;font-size:.8rem"></p>
+
+      <div class="grid2">
+        <label>Hora inicio <input type="time" name="start_time" required></label>
+        <label>Hora fin <input type="time" name="end_time"></label>
+      </div>
+      <label>Recordarme
+        <select name="remind">
+          <option value="-1">No</option>
+          <option value="0">A la hora</option>
+          <option value="10">10 min antes</option>
+          <option value="30" selected>30 min antes</option>
+          <option value="60">1 hora antes</option>
+          <option value="120">2 horas antes</option>
+          <option value="1440">1 día antes</option>
+        </select>
+      </label>
 
       <label>Lugar / aula
         <input name="lugar" placeholder="Opcional">

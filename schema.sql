@@ -16,7 +16,9 @@ create table if not exists public.events (
   links jsonb not null default '[]',        -- ["https://..."]
   files jsonb not null default '[]',        -- [{name, path, type}]
   remind_minutes int not null default 30,   -- -1 = sin recordatorio
-  recurring_weekday int check (recurring_weekday between 0 and 6),  -- 0=domingo ... 6=sábado
+  recurring_weekday int check (recurring_weekday between 0 and 6),  -- (antiguo) 0=domingo ... 6=sábado
+  end_date date,                            -- último día del rango (null = un solo día o sin fin)
+  weekdays smallint[],                      -- días en que se repite: {0..6}; {0,1,2,3,4,5,6} = todos los días
   created_at timestamptz not null default now()
 );
 create index if not exists events_user_date_idx on public.events (user_id, event_date);

@@ -48,7 +48,8 @@ h1, h2, h3 { margin: 0; font-weight: 600; }
 .row { display: flex; gap: 0.5rem; align-items: center; }
 .row.end { justify-content: flex-end; }
 .stack { display: flex; flex-direction: column; gap: 1rem; }
-.grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.8rem; }
+.grid2 { display: grid; grid-template-columns: minmax(0,1fr) minmax(0,1fr); gap: 0.8rem; }
+.grid2 input { min-width: 0; }
 
 /* ===== EFECTO GLASSMORPHISM ===== */
 .glass {
@@ -250,3 +251,15 @@ select option {
   background-color: var(--card-bg);
   color: var(--text);
 }
+/* ===== SELECTOR DE DÍAS (rango / repetición) ===== */
+.daypicker { display: grid; grid-template-columns: repeat(7, 1fr); gap: 0.35rem; }
+.daypicker label.day { position: relative; gap: 0; }
+.daypicker input { position: absolute; opacity: 0; pointer-events: none; width: 1px; height: 1px; }
+.daypicker span {
+  display: grid; place-items: center; height: 2.4rem;
+  border: 1px solid var(--line); border-radius: 12px;
+  color: var(--text); font-weight: 600; cursor: pointer; transition: 0.2s;
+  user-select: none;
+}
+.daypicker input:checked + span { background: var(--primary); border-color: var(--primary); color: #fff; }
+.daypicker input:focus-visible + span { box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.3); }
