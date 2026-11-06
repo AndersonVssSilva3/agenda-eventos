@@ -21,6 +21,10 @@ create table if not exists public.events (
   weekdays smallint[],                      -- días en que se repite: {0..6}; {0,1,2,3,4,5,6} = todos los días
   created_at timestamptz not null default now()
 );
+-- Columnas nuevas (por si la tabla ya existía de antes)
+alter table public.events add column if not exists end_date date;
+alter table public.events add column if not exists weekdays smallint[];
+
 create index if not exists events_user_date_idx on public.events (user_id, event_date);
 
 -- Dispositivos suscritos a notificaciones
@@ -46,9 +50,11 @@ alter table public.events enable row level security;
 alter table public.push_subscriptions enable row level security;
 alter table public.reminders_sent enable row level security;
 
+drop policy if exists "events: dueño" on public.events;
 create policy "events: dueño" on public.events
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
+drop policy if exists "push: dueño" on public.push_subscriptions;
 create policy "push: dueño" on public.push_subscriptions
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 -- reminders_sent: sin políticas → solo la función de servidor puede usarla
@@ -58,9 +64,12 @@ insert into storage.buckets (id, name, public)
 values ('event-files', 'event-files', false)
 on conflict (id) do nothing;
 
+drop policy if exists "files: ver los míos" on storage.objects;
 create policy "files: ver los míos" on storage.objects
   for select using (bucket_id = 'event-files' and (storage.foldername(name))[1] = auth.uid()::text);
+drop policy if exists "files: subir a mi carpeta" on storage.objects;
 create policy "files: subir a mi carpeta" on storage.objects
   for insert with check (bucket_id = 'event-files' and (storage.foldername(name))[1] = auth.uid()::text);
+drop policy if exists "files: borrar los míos" on storage.objects;
 create policy "files: borrar los míos" on storage.objects
   for delete using (bucket_id = 'event-files' and (storage.foldername(name))[1] = auth.uid()::text);
