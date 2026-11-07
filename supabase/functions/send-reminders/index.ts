@@ -67,12 +67,12 @@ Deno.serve(async (req) => {
   const days = [localDay(0), localDay(1)];
   const dates = days.map((d) => d.date);
 
-  // Todo evento semanal tiene recurring_weekday (su primer día); los días se filtran abajo.
+  // Todo evento semanal tiene recurring_weekday (su primer día); los días y fechas se filtran abajo.
   const { data: events, error } = await sb
     .from("events")
     .select("*")
     .gte("remind_minutes", 0)
-    .or(`event_date.in.(${dates.join(",")}),recurring_weekday.not.is.null`);
+    .or(`event_date.in.(${dates.join(",")}),recurring_weekday.not.is.null,specific_dates.not.is.null`);
 
   if (error) return new Response(error.message, { status: 500 });
 
@@ -82,9 +82,11 @@ Deno.serve(async (req) => {
   for (const ev of events ?? []) {
     for (const day of days) {
       const dias = diasDe(ev);
-      const applies = dias.length === 0
+      const applies = ev.specific_dates?.length
+        ? ev.specific_dates.includes(day.date)
+        : dias.length === 0
         ? ev.event_date === day.date
-        : dias.includes(day.weekday) && day.date >= ev.event_date && (!ev.end_date || day.date <= ev.end_date);
+        : dias.includes(day.weekday) && day.date >= ev.event_date;
       if (!applies) continue;
 
       const start = new Date(`${day.date}T${String(ev.start_time).slice(0, 8)}${offsetStr}`).getTime();

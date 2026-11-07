@@ -133,25 +133,32 @@ function diasDe(ev) {
 
 function textoDias(ev) {
   const dias = diasDe(ev);
-  const corta = (s) => parseYmd(s).toLocaleDateString('es', { day: 'numeric', month: 'short' });
-  if (dias.length === 7 && ev.end_date) return `del ${corta(ev.event_date)} al ${corta(ev.end_date)}`;
-  const hasta = ev.end_date ? `, hasta el ${corta(ev.end_date)}` : '';
   if (dias.length === 7) return 'todos los días';
   const orden = [1, 2, 3, 4, 5, 6, 0].filter((d) => dias.includes(d));
-  if (orden.join() === '1,2,3,4,5') return `lunes a viernes${hasta}`;
-  return orden.map((d) => DIAS[d].toLowerCase()).join(', ') + hasta;
+  if (orden.join() === '1,2,3,4,5') return 'lunes a viernes';
+  return orden.map((d) => DIAS[d].toLowerCase()).join(', ');
+}
+
+function resumenFechas(fechas) {
+  const corta = (s) => parseYmd(s).toLocaleDateString('es', { day: 'numeric', month: 'short' });
+  if (fechas.length <= 3) return fechas.map(corta).join(', ');
+  return `${fechas.slice(0, 2).map(corta).join(', ')} y ${fechas.length - 2} más`;
 }
 
 function occurrences(ev, from, days) {
   const start = parseYmd(ev.event_date);
   const end = addDays(from, days);
+  if (ev.specific_dates?.length) {
+    const desde = ymd(from);
+    const hasta = ymd(end);
+    return ev.specific_dates.filter((f) => f >= desde && f <= hasta);
+  }
   const dias = diasDe(ev);
   if (!dias.length) return start >= from && start <= end ? [ymd(start)] : [];
-  const fin = ev.end_date ? parseYmd(ev.end_date) : null;
   const out = [];
   for (let i = 0; i <= days; i++) {
     const d = addDays(from, i);
-    if (dias.includes(d.getDay()) && d >= start && (!fin || d <= fin)) out.push(ymd(d));
+    if (dias.includes(d.getDay()) && d >= start) out.push(ymd(d));
   }
   return out;
 }
@@ -226,7 +233,7 @@ function cardHTML(ev, isTimeline = false, dateStr = ev.event_date) {
           ${statusLabel}
         </div>
         <div class="ev-title">${esc(ev.title)}</div>
-        <div class="ev-meta">🕒 ${esc(horas)} ${diasDe(ev).length ? ` · 🔁 ${esc(textoDias(ev))}` : ''}</div>
+        <div class="ev-meta">🕒 ${esc(horas)} ${diasDe(ev).length ? ` · 🔁 ${esc(textoDias(ev))}` : ''}${ev.specific_dates?.length ? ` · 📅 ${esc(resumenFechas(ev.specific_dates))}` : ''}</div>
         ${ev.location ? `<div class="ev-meta">📍 ${esc(ev.location)}</div>` : ''}
         ${ev.remind_minutes >= 0 ? `<div class="ev-meta">🔔 ${ev.remind_minutes === 0 ? 'A la hora' : ev.remind_minutes >= 1440 ? '1 día antes' : ev.remind_minutes + ' min antes'}</div>` : ''}
       </div>
@@ -287,16 +294,12 @@ function renderAgenda() {
   $('#agenda-list').innerHTML = html || '<div class="empty">Sin eventos próximos.</div>';
 }
 
-function renderCalendar() {
-  const y = mesActual.getFullYear();
-  const m = mesActual.getMonth();
-  $('#month-title').textContent = mesActual.toLocaleDateString('es', { month: 'long', year: 'numeric' });
-
+// Días que se muestran en la cuadrícula de un mes, de lunes a domingo.
+function celdasMes(y, m) {
   const first = new Date(y, m, 1);
   const startDow = (first.getDay() + 6) % 7; // lunes=0
   const daysInMonth = new Date(y, m + 1, 0).getDate();
   const prevDays = new Date(y, m, 0).getDate();
-  const today = ymd(new Date());
 
   const cells = [];
   for (let i = startDow - 1; i >= 0; i--) {
@@ -311,8 +314,14 @@ function renderCalendar() {
     const d = new Date(y, m + 1, cells.length - startDow - daysInMonth + 1);
     cells.push({ date: ymd(d), other: true, num: d.getDate() });
   }
+  return cells;
+}
 
-  const html = cells.map((c) => {
+function renderCalendar() {
+  $('#month-title').textContent = mesActual.toLocaleDateString('es', { month: 'long', year: 'numeric' });
+  const today = ymd(new Date());
+
+  const html = celdasMes(mesActual.getFullYear(), mesActual.getMonth()).map((c) => {
     const evs = eventsOn(c.date);
     const tipos = [...new Set(evs.map((e) => e.kind))];
     const cls = ['cal-day'];
@@ -335,8 +344,7 @@ function renderCalendar() {
 }
 
 function renderSchedule() {
-  const hoy = ymd(new Date());
-  const rec = events.filter((e) => diasDe(e).length && (!e.end_date || e.end_date >= hoy));
+  const rec = events.filter((e) => diasDe(e).length);
   if (!rec.length) {
     $('#schedule').innerHTML = '<div class="empty">Aún no tienes horario semanal.<br>Crea una clase o cita y marca “Se repite cada semana”.</div>';
     return;
@@ -394,13 +402,58 @@ function marcarDias(dias) {
 
 function actualizarRepeticion() {
   const repite = form.elements.repeat.checked;
-  $('#hasta-ayuda').classList.toggle('hidden', repite || !form.elements.hasta.value);
-  form.elements.hasta.min = form.elements.event_date.value;
   $('#repeat-days').classList.toggle('hidden', !repite);
-  if (repite && !casillasDia().some((c) => c.checked) && form.elements.event_date.value) {
-    marcarDias([parseYmd(form.elements.event_date.value).getDay()]);
+  // Lo que se repite cada semana solo necesita el día en que empieza.
+  if (repite) fechasElegidas = fechasElegidas.slice(0, 1);
+  if (repite && !casillasDia().some((c) => c.checked) && fechasElegidas.length) {
+    marcarDias([parseYmd(fechasElegidas[0]).getDay()]);
   }
+  renderFechas();
 }
+
+/* ---------- Calendario de fechas del formulario ---------- */
+let fechasElegidas = [];
+let mesFechas = new Date();
+
+function renderFechas() {
+  const repite = form.elements.repeat.checked;
+  const hoy = ymd(new Date());
+  $('#fechas-label').textContent = repite ? 'Fecha de inicio' : 'Fechas';
+  $('#fechas-ayuda').textContent = repite
+    ? 'Elige el día en que empieza a repetirse.'
+    : 'Toca cada día que quieras; tócalo otra vez para quitarlo. Todos tendrán el mismo horario.';
+  $('#fechas-resumen').textContent = fechasElegidas.length ? resumenFechas(fechasElegidas) : 'Elegir fecha';
+  $('#fechas-mes-titulo').textContent = mesFechas.toLocaleDateString('es', { month: 'long', year: 'numeric' });
+  $('#fechas-cal').innerHTML = celdasMes(mesFechas.getFullYear(), mesFechas.getMonth()).map((c) => {
+    const elegido = fechasElegidas.includes(c.date);
+    const cls = ['cal-day', c.other && 'other', c.date === hoy && 'today', elegido && 'elegido'].filter(Boolean).join(' ');
+    return `<button type="button" class="${cls}" data-fecha="${c.date}" aria-pressed="${elegido}">${c.num}</button>`;
+  }).join('');
+}
+
+function abrirFechas(abierto) {
+  $('#fechas-panel').classList.toggle('hidden', !abierto);
+  $('#fechas-btn').setAttribute('aria-expanded', String(abierto));
+}
+
+function cambiarMesFechas(delta) {
+  mesFechas = new Date(mesFechas.getFullYear(), mesFechas.getMonth() + delta, 1);
+  renderFechas();
+}
+
+$('#fechas-btn').addEventListener('click', () => abrirFechas($('#fechas-panel').classList.contains('hidden')));
+$('#fechas-listo').addEventListener('click', () => abrirFechas(false));
+$('#fechas-prev').addEventListener('click', () => cambiarMesFechas(-1));
+$('#fechas-next').addEventListener('click', () => cambiarMesFechas(1));
+$('#fechas-limpiar').addEventListener('click', () => { fechasElegidas = []; renderFechas(); });
+$('#fechas-cal').addEventListener('click', (e) => {
+  const fecha = e.target.dataset.fecha;
+  if (!fecha) return;
+  if (form.elements.repeat.checked) fechasElegidas = [fecha];
+  else if (fechasElegidas.includes(fecha)) fechasElegidas = fechasElegidas.filter((f) => f !== fecha);
+  else fechasElegidas = [...fechasElegidas, fecha].sort();
+  renderFechas();
+});
 
 function openForm(ev = null) {
   form.reset();
@@ -412,8 +465,7 @@ function openForm(ev = null) {
   if (ev) {
     el.kind.value = ev.kind;
     el.titulo.value = ev.title;
-    el.event_date.value = ev.event_date;
-    el.hasta.value = ev.end_date || '';
+    fechasElegidas = ev.specific_dates?.length ? [...ev.specific_dates] : [ev.event_date];
     el.start_time.value = hhmm(ev.start_time);
     el.end_time.value = hhmm(ev.end_time);
     el.remind.value = String(ev.remind_minutes);
@@ -423,8 +475,10 @@ function openForm(ev = null) {
     el.notas.value = ev.notes || '';
     el.links.value = (ev.links || []).join('\n');
   } else {
-    el.event_date.value = ymd(new Date());
+    fechasElegidas = [ymd(new Date())];
   }
+  mesFechas = fechasElegidas.length ? parseYmd(fechasElegidas[0]) : new Date();
+  abrirFechas(false);
   actualizarRepeticion();
   renderExistingFiles();
   dlg.showModal();
@@ -432,8 +486,6 @@ function openForm(ev = null) {
 
 $('#btn-cancel').addEventListener('click', () => dlg.close());
 $('#btn-close').addEventListener('click', () => dlg.close());
-form.elements.hasta.addEventListener('change', actualizarRepeticion);
-form.elements.event_date.addEventListener('change', actualizarRepeticion);
 $('#existing-files').addEventListener('click', (e) => {
   const i = e.target.dataset.rm;
   if (i === undefined) return;
@@ -442,10 +494,6 @@ $('#existing-files').addEventListener('click', (e) => {
   renderExistingFiles();
 });
 
-form.elements.kind.addEventListener('change', (e) => {
-  if (e.target.value === 'clase') form.elements.repeat.checked = true;
-  actualizarRepeticion();
-});
 form.elements.repeat.addEventListener('change', actualizarRepeticion);
 $('#btn-lun-vie').addEventListener('click', () => marcarDias([1, 2, 3, 4, 5]));
 
@@ -456,12 +504,11 @@ form.addEventListener('submit', async (e) => {
   btn.disabled = true; btn.textContent = 'Guardando…';
 
   try {
-    const hasta = el.hasta.value || null;
-    if (hasta && hasta < el.event_date.value) throw new Error('La fecha “Hasta” no puede ser anterior a la fecha de inicio');
-    // Un rango sin días elegidos ocurre todos los días entre las dos fechas.
-    const dias = el.repeat.checked
-      ? casillasDia().filter((c) => c.checked).map((c) => Number(c.value))
-      : hasta && hasta > el.event_date.value ? [0, 1, 2, 3, 4, 5, 6] : [];
+    if (!fechasElegidas.length) {
+      abrirFechas(true);
+      throw new Error('Elige al menos una fecha');
+    }
+    const dias = el.repeat.checked ? casillasDia().filter((c) => c.checked).map((c) => Number(c.value)) : [];
     if (el.repeat.checked && !dias.length) throw new Error('Elige al menos un día para repetir');
 
     const id = el.event_id.value || crypto.randomUUID();
@@ -483,7 +530,8 @@ form.addEventListener('submit', async (e) => {
       user_id: user.id,
       kind: el.kind.value,
       title: el.titulo.value.trim(),
-      event_date: el.event_date.value,
+      event_date: fechasElegidas[0],
+      specific_dates: fechasElegidas.length > 1 ? fechasElegidas : null,
       start_time: el.start_time.value,
       end_time: el.end_time.value || null,
       location: el.lugar.value.trim() || null,
@@ -493,7 +541,6 @@ form.addEventListener('submit', async (e) => {
       remind_minutes: Number(el.remind.value),
       recurring_days: dias.length ? dias : null,
       recurring_weekday: dias.length ? dias[0] : null,
-      end_date: dias.length ? hasta : null,
     };
 
     const { error } = await sb.from('events').upsert(row);
@@ -517,7 +564,8 @@ document.addEventListener('click', async (e) => {
   if (editId) return openForm(events.find((x) => x.id === editId));
   if (delId) {
     const ev = events.find((x) => x.id === delId);
-    if (!confirm(`¿Eliminar "${ev.title}"?` + (ev.recurring_weekday != null ? '\nSe borrarán todas sus repeticiones.' : ''))) return;
+    const variasFechas = ev.recurring_weekday != null || ev.specific_dates?.length;
+    if (!confirm(`¿Eliminar "${ev.title}"?` + (variasFechas ? '\nSe borrarán todas sus fechas.' : ''))) return;
     const paths = (ev.files || []).map((f) => f.path);
     if (paths.length) await sb.storage.from(BUCKET).remove(paths);
     const { error } = await sb.from('events').delete().eq('id', delId);

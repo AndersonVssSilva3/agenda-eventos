@@ -210,10 +210,20 @@ dialog::backdrop { background: rgba(0,0,0,0.6); backdrop-filter: blur(5px); }
 .field-hint { margin: 0; font-size: 0.8rem; color: var(--text-muted); }
 .grid2 > label { min-width: 0; }
 .grid2 input { min-width: 0; }
-/* Los campos de fecha no se encogen lo suficiente para ir lado a lado en un celular. */
-@media (max-width: 480px) {
-  .grid2.fechas { grid-template-columns: 1fr; }
-}
+
+/* ===== CALENDARIO DE FECHAS DEL FORMULARIO ===== */
+.campo-fechas { display: flex; flex-direction: column; gap: 0.4rem; }
+.campo-label { font-size: 0.85rem; color: var(--text-muted); font-weight: 500; }
+.fechas-btn { display: flex; justify-content: space-between; align-items: center; gap: 0.6rem; width: 100%; padding: 0.8rem 1rem; border: 1px solid var(--line); border-radius: 14px; background: var(--card-bg); color: var(--text); font: inherit; font-weight: 500; text-align: left; cursor: pointer; }
+.fechas-panel { display: flex; flex-direction: column; gap: 0.5rem; padding: 0.8rem; border: 1px solid var(--line); border-radius: 14px; }
+.fechas-panel.hidden { display: none; }
+.fechas-mes { display: flex; justify-content: space-between; align-items: center; text-transform: capitalize; }
+.fechas-panel .weekdays { margin-bottom: 0; }
+.fechas-cal { gap: 2px; padding: 0; }
+.fechas-cal .cal-day { padding: 0; border: none; background: none; color: var(--text); font: inherit; font-size: 0.9rem; }
+.fechas-cal .cal-day.other { color: var(--text-muted); opacity: 0.45; }
+.fechas-cal .cal-day.today { background: none; color: var(--text); box-shadow: none; border: 1px dashed var(--primary); }
+.fechas-cal .cal-day.elegido { background: var(--primary); color: #fff; font-weight: 700; opacity: 1; }
 
 /* ===== DÍAS DE REPETICIÓN ===== */
 .repeat-days { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; }
