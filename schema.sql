@@ -18,6 +18,7 @@ create table if not exists public.events (
   remind_minutes int not null default 30,   -- -1 = sin recordatorio
   recurring_weekday int check (recurring_weekday between 0 and 6),  -- primer día de repetición; 0=domingo ... 6=sábado
   recurring_days int[],                     -- todos los días en que se repite
+  end_date date,                            -- último día de la repetición (vacío = sin fin)
   created_at timestamptz not null default now()
 );
 create index if not exists events_user_date_idx on public.events (user_id, event_date);

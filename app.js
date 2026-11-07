@@ -133,10 +133,13 @@ function diasDe(ev) {
 
 function textoDias(ev) {
   const dias = diasDe(ev);
+  const corta = (s) => parseYmd(s).toLocaleDateString('es', { day: 'numeric', month: 'short' });
+  if (dias.length === 7 && ev.end_date) return `del ${corta(ev.event_date)} al ${corta(ev.end_date)}`;
+  const hasta = ev.end_date ? `, hasta el ${corta(ev.end_date)}` : '';
   if (dias.length === 7) return 'todos los días';
   const orden = [1, 2, 3, 4, 5, 6, 0].filter((d) => dias.includes(d));
-  if (orden.join() === '1,2,3,4,5') return 'lunes a viernes';
-  return orden.map((d) => DIAS[d].toLowerCase()).join(', ');
+  if (orden.join() === '1,2,3,4,5') return `lunes a viernes${hasta}`;
+  return orden.map((d) => DIAS[d].toLowerCase()).join(', ') + hasta;
 }
 
 function occurrences(ev, from, days) {
@@ -144,10 +147,11 @@ function occurrences(ev, from, days) {
   const end = addDays(from, days);
   const dias = diasDe(ev);
   if (!dias.length) return start >= from && start <= end ? [ymd(start)] : [];
+  const fin = ev.end_date ? parseYmd(ev.end_date) : null;
   const out = [];
   for (let i = 0; i <= days; i++) {
     const d = addDays(from, i);
-    if (dias.includes(d.getDay()) && d >= start) out.push(ymd(d));
+    if (dias.includes(d.getDay()) && d >= start && (!fin || d <= fin)) out.push(ymd(d));
   }
   return out;
 }
@@ -228,7 +232,7 @@ function cardHTML(ev, isTimeline = false, dateStr = ev.event_date) {
       </div>
     </div>
     ${ev.notes ? `<p class="ev-notes">${esc(ev.notes)}</p>` : ''}
-    ${(ev.links || []).length ? `<div class="chips">${ev.links.map((l) => `<a class="chip" href="${esc(l)}" target="_blank" rel="noopener">🔗 ${esc(l.replace(/^https?:\/\//, '').slice(0, 32))}</a>`).join('')}</div>` : ''}
+    ${(ev.links || []).length ? `<div class="chips">${ev.links.map((l) => `<a class="chip" href="${esc(l)}" target="_blank" rel="noopener" data-enlace>🔗 ${esc(l.replace(/^https?:\/\//, '').slice(0, 32))}</a>`).join('')}</div>` : ''}
     ${imgs.length ? `<div class="thumbs">${imgs.map((f) => `<a href="${urlMap[f.path]}" target="_blank" rel="noopener"><img src="${urlMap[f.path]}" alt="${esc(f.name)}" loading="lazy"></a>`).join('')}</div>` : ''}
     ${docs.length ? `<div class="chips">${docs.map((f) => `<a class="chip" href="${urlMap[f.path]}" target="_blank" rel="noopener">📎 ${esc(f.name)}</a>`).join('')}</div>` : ''}
     <div class="ev-actions">
@@ -331,7 +335,8 @@ function renderCalendar() {
 }
 
 function renderSchedule() {
-  const rec = events.filter((e) => diasDe(e).length);
+  const hoy = ymd(new Date());
+  const rec = events.filter((e) => diasDe(e).length && (!e.end_date || e.end_date >= hoy));
   if (!rec.length) {
     $('#schedule').innerHTML = '<div class="empty">Aún no tienes horario semanal.<br>Crea una clase o cita y marca “Se repite cada semana”.</div>';
     return;
@@ -389,6 +394,8 @@ function marcarDias(dias) {
 
 function actualizarRepeticion() {
   const repite = form.elements.repeat.checked;
+  $('#hasta-ayuda').classList.toggle('hidden', repite || !form.elements.hasta.value);
+  form.elements.hasta.min = form.elements.event_date.value;
   $('#repeat-days').classList.toggle('hidden', !repite);
   if (repite && !casillasDia().some((c) => c.checked) && form.elements.event_date.value) {
     marcarDias([parseYmd(form.elements.event_date.value).getDay()]);
@@ -406,6 +413,7 @@ function openForm(ev = null) {
     el.kind.value = ev.kind;
     el.titulo.value = ev.title;
     el.event_date.value = ev.event_date;
+    el.hasta.value = ev.end_date || '';
     el.start_time.value = hhmm(ev.start_time);
     el.end_time.value = hhmm(ev.end_time);
     el.remind.value = String(ev.remind_minutes);
@@ -423,6 +431,9 @@ function openForm(ev = null) {
 }
 
 $('#btn-cancel').addEventListener('click', () => dlg.close());
+$('#btn-close').addEventListener('click', () => dlg.close());
+form.elements.hasta.addEventListener('change', actualizarRepeticion);
+form.elements.event_date.addEventListener('change', actualizarRepeticion);
 $('#existing-files').addEventListener('click', (e) => {
   const i = e.target.dataset.rm;
   if (i === undefined) return;
@@ -445,7 +456,12 @@ form.addEventListener('submit', async (e) => {
   btn.disabled = true; btn.textContent = 'Guardando…';
 
   try {
-    const dias = el.repeat.checked ? casillasDia().filter((c) => c.checked).map((c) => Number(c.value)) : [];
+    const hasta = el.hasta.value || null;
+    if (hasta && hasta < el.event_date.value) throw new Error('La fecha “Hasta” no puede ser anterior a la fecha de inicio');
+    // Un rango sin días elegidos ocurre todos los días entre las dos fechas.
+    const dias = el.repeat.checked
+      ? casillasDia().filter((c) => c.checked).map((c) => Number(c.value))
+      : hasta && hasta > el.event_date.value ? [0, 1, 2, 3, 4, 5, 6] : [];
     if (el.repeat.checked && !dias.length) throw new Error('Elige al menos un día para repetir');
 
     const id = el.event_id.value || crypto.randomUUID();
@@ -477,6 +493,7 @@ form.addEventListener('submit', async (e) => {
       remind_minutes: Number(el.remind.value),
       recurring_days: dias.length ? dias : null,
       recurring_weekday: dias.length ? dias[0] : null,
+      end_date: dias.length ? hasta : null,
     };
 
     const { error } = await sb.from('events').upsert(row);
@@ -507,6 +524,30 @@ document.addEventListener('click', async (e) => {
     if (error) return toast(error.message);
     toast('Eliminado');
     load();
+  }
+});
+
+/* ---------- Enlaces que abren la app instalada ---------- */
+const APPS_REUNION = [
+  { hosts: /(^|\.)zoom\.us$/i, paquete: 'us.zoom.videomeetings' },
+  { hosts: /^meet\.google\.com$/i, paquete: 'com.google.android.apps.tachyon' },
+  { hosts: /^teams\.(microsoft|live)\.com$/i, paquete: 'com.microsoft.teams' },
+];
+
+document.addEventListener('click', (e) => {
+  const a = e.target.closest?.('a[data-enlace]');
+  if (!a) return;
+  const url = new URL(a.href);
+  const paquete = APPS_REUNION.find((app) => app.hosts.test(url.hostname))?.paquete;
+
+  if (nativo) {
+    e.preventDefault();
+    nativo.abrirEnlace({ url: url.href, paquete }).catch(() => window.open(url.href, '_blank'));
+  } else if (paquete && /android/i.test(navigator.userAgent)) {
+    // Chrome abre la app si está instalada y, si no, sigue el enlace normal.
+    e.preventDefault();
+    location.href = `intent://${url.host}${url.pathname}${url.search}#Intent;scheme=https;package=${paquete};`
+      + `S.browser_fallback_url=${encodeURIComponent(url.href)};end`;
   }
 });
 

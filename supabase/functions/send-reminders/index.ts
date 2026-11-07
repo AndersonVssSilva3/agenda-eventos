@@ -84,7 +84,7 @@ Deno.serve(async (req) => {
       const dias = diasDe(ev);
       const applies = dias.length === 0
         ? ev.event_date === day.date
-        : dias.includes(day.weekday) && day.date >= ev.event_date;
+        : dias.includes(day.weekday) && day.date >= ev.event_date && (!ev.end_date || day.date <= ev.end_date);
       if (!applies) continue;
 
       const start = new Date(`${day.date}T${String(ev.start_time).slice(0, 8)}${offsetStr}`).getTime();

@@ -203,6 +203,18 @@ dialog::backdrop { background: rgba(0,0,0,0.6); backdrop-filter: blur(5px); }
 .toast { position: fixed; left: 50%; bottom: 6rem; transform: translate(-50%,20px); background: #1e293b; color: #fff; padding: 0.8rem 1.2rem; border-radius: 14px; opacity: 0; pointer-events: none; transition: 0.3s; font-weight: 500; z-index: 50; box-shadow: 0 8px 24px rgba(0,0,0,0.3); }
 .toast.show { opacity: 1; transform: translate(-50%,0); }
 
+/* ===== FORMULARIO ===== */
+.dlg-head { display: flex; align-items: center; justify-content: space-between; gap: 0.8rem; }
+.dlg-head h2 { margin: 0; }
+#btn-close { position: sticky; top: 0; flex-shrink: 0; }
+.field-hint { margin: 0; font-size: 0.8rem; color: var(--text-muted); }
+.grid2 > label { min-width: 0; }
+.grid2 input { min-width: 0; }
+/* Los campos de fecha no se encogen lo suficiente para ir lado a lado en un celular. */
+@media (max-width: 480px) {
+  .grid2.fechas { grid-template-columns: 1fr; }
+}
+
 /* ===== DÍAS DE REPETICIÓN ===== */
 .repeat-days { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; }
 .day-chip { position: relative; cursor: pointer; }

@@ -2,12 +2,14 @@ package com.miagenda.app;
 
 import android.Manifest;
 import android.annotation.SuppressLint;
+import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
 import android.net.Uri;
 import android.os.Build;
 import android.os.PowerManager;
 import android.provider.Settings;
+import android.util.Log;
 
 import com.getcapacitor.JSArray;
 import com.getcapacitor.PermissionState;
@@ -52,6 +54,33 @@ public class AlarmasPlugin extends Plugin {
         }
         VozService.anunciar(getContext(), "prueba", "Mi Agenda", texto, false);
         call.resolve();
+    }
+
+    /** Abre la app indicada si está instalada; si no, lo que Android tenga para ese enlace. */
+    @PluginMethod
+    public void abrirEnlace(PluginCall call) {
+        String url = call.getString("url");
+        if (url == null || !(url.startsWith("https://") || url.startsWith("http://"))) {
+            call.reject("Enlace no válido");
+            return;
+        }
+        Intent intent = new Intent(Intent.ACTION_VIEW, Uri.parse(url)).addCategory(Intent.CATEGORY_BROWSABLE);
+        String paquete = call.getString("paquete");
+        try {
+            if (paquete != null) {
+                try {
+                    getActivity().startActivity(new Intent(intent).setPackage(paquete));
+                    call.resolve();
+                    return;
+                } catch (ActivityNotFoundException e) {
+                    Log.i("MiAgenda", "App no instalada: " + paquete);
+                }
+            }
+            getActivity().startActivity(intent);
+            call.resolve();
+        } catch (ActivityNotFoundException e) {
+            call.reject("No hay ninguna app para abrir este enlace", e);
+        }
     }
 
     @PluginMethod

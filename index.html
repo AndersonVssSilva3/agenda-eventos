@@ -103,7 +103,10 @@
   <!-- FORMULARIO -->
   <dialog id="dlg" class="glass">
     <form id="event-form" class="stack">
-      <h2 id="dlg-title">Nuevo evento</h2>
+      <div class="dlg-head">
+        <h2 id="dlg-title">Nuevo evento</h2>
+        <button type="button" class="icon-btn" id="btn-close" title="Cerrar" aria-label="Cerrar">✕</button>
+      </div>
       <input type="hidden" name="event_id">
 
       <label>Tipo
@@ -118,24 +121,26 @@
         <input name="titulo" required placeholder="Ej: Concierto, Cálculo II, Dentista">
       </label>
 
-      <div class="grid2">
+      <div class="grid2 fechas">
         <label>Fecha <input type="date" name="event_date" required></label>
-        <label>Hora inicio <input type="time" name="start_time" required></label>
+        <label>Hasta (opcional) <input type="date" name="hasta"></label>
       </div>
+      <p id="hasta-ayuda" class="field-hint hidden">Se creará para todos los días del rango. Si solo son algunos días, marca “Se repite” y elígelos.</p>
       <div class="grid2">
+        <label>Hora inicio <input type="time" name="start_time" required></label>
         <label>Hora fin <input type="time" name="end_time"></label>
-        <label>Recordarme
-          <select name="remind">
-            <option value="-1">No</option>
-            <option value="0">A la hora</option>
-            <option value="10">10 min antes</option>
-            <option value="30" selected>30 min antes</option>
-            <option value="60">1 hora antes</option>
-            <option value="120">2 horas antes</option>
-            <option value="1440">1 día antes</option>
-          </select>
-        </label>
       </div>
+      <label>Recordarme
+        <select name="remind">
+          <option value="-1">No</option>
+          <option value="0">A la hora</option>
+          <option value="10">10 min antes</option>
+          <option value="30" selected>30 min antes</option>
+          <option value="60">1 hora antes</option>
+          <option value="120">2 horas antes</option>
+          <option value="1440">1 día antes</option>
+        </select>
+      </label>
 
       <label class="check"><input type="checkbox" name="repeat"> 🔁 Se repite cada semana (ideal para clases)</label>
       <div id="repeat-days" class="repeat-days hidden">
@@ -155,7 +160,7 @@
       <label>Notas
         <textarea name="notas" rows="3" placeholder="Opcional"></textarea>
       </label>
-      <label>Links (uno por línea)
+      <label>Links (uno por línea; Zoom, Meet y Teams abren su app en Android)
         <textarea name="links" rows="3" placeholder="https://..."></textarea>
       </label>
 
