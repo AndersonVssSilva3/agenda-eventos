@@ -51,6 +51,11 @@ create policy "push: dueño" on public.push_subscriptions
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 -- reminders_sent: sin políticas → solo la función de servidor puede usarla
 
+-- Supabase ya no da acceso automático a tablas nuevas (desde el 30-oct-2026)
+grant select, insert, update, delete on public.events to authenticated, service_role;
+grant select, insert, update, delete on public.push_subscriptions to authenticated, service_role;
+grant select, insert, update, delete on public.reminders_sent to service_role;
+
 -- Almacenamiento privado para fotos y archivos
 insert into storage.buckets (id, name, public)
 values ('event-files', 'event-files', false)

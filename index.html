@@ -42,6 +42,7 @@
       </div>
       <div class="row">
         <button id="btn-theme" class="icon-btn" title="Cambiar tema">🌙</button>
+        <button id="btn-test-alert" class="icon-btn" title="Probar voz, sonido y vibración">🔊</button>
         <button id="btn-push" class="icon-btn" title="Activar notificaciones">🔔</button>
         <button id="btn-logout" class="icon-btn" title="Salir">⎋</button>
       </div>
@@ -158,6 +159,18 @@
         <button class="btn primary" id="btn-save">Guardar</button>
       </div>
     </form>
+  </dialog>
+
+  <!-- ALERTA DE RECORDATORIO -->
+  <dialog id="dlg-alerta" class="glass">
+    <div class="stack">
+      <h2>🔔 <span id="alerta-titulo"></span></h2>
+      <p id="alerta-texto"></p>
+      <div class="row end">
+        <button type="button" class="btn ghost" id="alerta-escuchar">🔊 Escuchar</button>
+        <button type="button" class="btn primary" id="alerta-cerrar">Entendido</button>
+      </div>
+    </div>
   </dialog>
 
   <div id="toast" class="toast"></div>

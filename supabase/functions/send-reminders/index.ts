@@ -67,13 +67,16 @@ Deno.serve(async (req) => {
       const mins = Math.max(0, Math.round(diff / 60000));
       const body = `${String(ev.start_time).slice(0, 5)}${ev.location ? " · " + ev.location : ""}` +
         (mins > 0 ? ` (en ${mins >= 120 ? Math.round(mins / 60) + " h" : mins + " min"})` : " (ahora)");
-      const payload = JSON.stringify({ title: ev.title, body, url: "./" });
+      const payload = JSON.stringify({ title: ev.title, body, event_id: ev.id, date: day.date });
+      // urgency high: Android entrega al momento aunque el celular esté en reposo.
+      // TTL: si el dispositivo sigue sin conexión pasada 1 hora, el aviso ya no sirve.
+      const pushOptions = { urgency: "high", TTL: 3600 };
 
       let ok = 0;
       for (const s of subs) {
         attempted++;
         try {
-          await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload);
+          await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, payload, pushOptions);
           ok++; sent++;
         } catch (err: any) {
           if (err.statusCode === 404 || err.statusCode === 410) {

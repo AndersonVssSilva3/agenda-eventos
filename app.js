@@ -111,6 +111,7 @@ async function load() {
   const { data, error } = await sb.from('events').select('*').order('event_date').order('start_time');
   if (error) return toast('Error al cargar: ' + error.message);
   events = data;
+  revisarRecordatorios();
 
   const paths = events.flatMap((ev) => (ev.files || []).map((f) => f.path));
   urlMap = {};
@@ -161,7 +162,7 @@ function eventsOn(dateStr) {
   ).sort((a, b) => a.start_time.localeCompare(b.start_time));
 }
 
-function cardHTML(ev, isTimeline = false) {
+function cardHTML(ev, isTimeline = false, dateStr = ev.event_date) {
   const files = ev.files || [];
   const imgs = files.filter((f) => f.type?.startsWith('image/') && urlMap[f.path]);
   const docs = files.filter((f) => !(f.type?.startsWith('image/')) && urlMap[f.path]);
@@ -175,15 +176,16 @@ function cardHTML(ev, isTimeline = false) {
   
   // Solo calculamos el estado si estamos en la vista de Hoy
   if (isTimeline) {
-    const start = new Date(`${ev.event_date}T${ev.start_time}`);
+    // Se usa la fecha de la ocurrencia: en las clases semanales, event_date es solo el primer día.
+    const start = new Date(`${dateStr}T${ev.start_time}`);
     let end;
     if (ev.end_time) {
-      end = new Date(`${ev.event_date}T${ev.end_time}`);
+      end = new Date(`${dateStr}T${ev.end_time}`);
     } else {
       end = new Date(start.getTime() + 60 * 60 * 1000); // Si no hay fin, asume 1 hora
     }
-    
-    if (ev.event_date === todayStr) {
+
+    if (dateStr === todayStr) {
       if (now >= start && now <= end) {
         statusClass = 'live';
         statusLabel = '<span class="live-badge">🔴 EN CURSO</span>';
@@ -228,7 +230,7 @@ function timelineHTML(dateStr) {
     html += `
       <div class="tl-item">
         <div class="tl-time">${hhmm(ev.start_time)}${dur ? `<small>${dur}</small>` : ''}</div>
-        <div>${cardHTML(ev, true)}</div>
+        <div>${cardHTML(ev, true, dateStr)}</div>
       </div>`;
   }
   return html;
@@ -501,8 +503,163 @@ $('#btn-push').addEventListener('click', async () => {
     );
     if (error) throw error;
     toast('🔔 Notificaciones activadas en este dispositivo');
+    lanzarAlerta({ key: `activado:${Date.now()}`, title: 'Notificaciones activadas', body: 'Así sonarán tus recordatorios' });
   } catch (err) {
     console.error(err);
     toast('No se pudo activar: ' + (err.message || err));
   }
 });
+
+/* ---------- Alertas: voz, sonido y vibración ---------- */
+const VIBRACION = [500, 200, 500, 200, 500, 200, 500];
+const REVISION_MS = 30000;
+const VENTANA_TRAS_INICIO_MS = 5 * 60000; // igual que la función send-reminders
+const avisados = new Set();
+const dlgAlerta = $('#dlg-alerta');
+let audioCtx = null;
+let textoAlerta = '';
+
+function yaAvisado(key) {
+  if (avisados.has(key)) return true;
+  try { return localStorage.getItem(`aviso:${key}`) === '1'; } catch { return false; }
+}
+
+function marcarAvisado(key) {
+  avisados.add(key);
+  try { localStorage.setItem(`aviso:${key}`, '1'); } catch { /* sin almacenamiento: basta la memoria */ }
+}
+
+// Los navegadores exigen un toque previo para permitir audio: se prepara en el primero.
+function prepararAudio() {
+  try {
+    audioCtx ??= new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  } catch (err) {
+    console.warn('Audio no disponible', err);
+  }
+}
+document.addEventListener('click', prepararAudio, { capture: true });
+
+async function sonar() {
+  if (!audioCtx) return;
+  // Sin un toque previo resume() no termina nunca: se espera poco y se sigue sin sonido.
+  await Promise.race([audioCtx.resume(), new Promise((r) => setTimeout(r, 300))]);
+  if (audioCtx.state !== 'running') return;
+  [880, 1175, 880].forEach((freq, i) => {
+    const inicio = audioCtx.currentTime + i * 0.28;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.0001, inicio);
+    gain.gain.exponentialRampToValueAtTime(0.4, inicio + 0.03);
+    gain.gain.exponentialRampToValueAtTime(0.0001, inicio + 0.25);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(inicio);
+    osc.stop(inicio + 0.26);
+  });
+}
+
+function hablar(texto) {
+  if (!('speechSynthesis' in window)) return;
+  speechSynthesis.cancel();
+  const voz = new SpeechSynthesisUtterance(texto);
+  voz.lang = 'es-ES';
+  const espanol = speechSynthesis.getVoices().find((v) => v.lang?.toLowerCase().startsWith('es'));
+  if (espanol) { voz.voice = espanol; voz.lang = espanol.lang; }
+  speechSynthesis.speak(voz);
+}
+
+function vibrar() {
+  // No existe en iPhone ni en la mayoría de PC: ahí simplemente no hace nada.
+  try { navigator.vibrate?.(VIBRACION); } catch { /* sin soporte */ }
+}
+
+function lanzarAlerta({ key, title, body }, { notificarSistema = false } = {}) {
+  if (yaAvisado(key)) return;
+  marcarAvisado(key);
+
+  textoAlerta = `Recordatorio: ${title}. ${body}`;
+  $('#alerta-titulo').textContent = title;
+  $('#alerta-texto').textContent = body;
+  if (!dlgAlerta.open) dlgAlerta.showModal();
+
+  sonar();
+  vibrar();
+  hablar(textoAlerta);
+
+  // Comparte etiqueta con el push: si llegan los dos, queda una sola notificación.
+  if (notificarSistema && document.hidden && 'Notification' in window && Notification.permission === 'granted') {
+    navigator.serviceWorker?.ready.then((reg) => reg.showNotification(title, {
+      body,
+      icon: './icon-192.png',
+      badge: './icon-192.png',
+      vibrate: VIBRACION,
+      tag: key,
+      requireInteraction: true,
+      data: { type: 'reminder', key, title, body },
+    })).catch(console.error);
+  }
+}
+
+$('#alerta-escuchar').addEventListener('click', () => {
+  prepararAudio();
+  sonar();
+  vibrar();
+  hablar(textoAlerta);
+});
+$('#alerta-cerrar').addEventListener('click', () => {
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
+  navigator.vibrate?.(0);
+  dlgAlerta.close();
+});
+
+$('#btn-test-alert').addEventListener('click', () => {
+  prepararAudio();
+  lanzarAlerta({ key: `prueba:${Date.now()}`, title: 'Prueba de alerta', body: 'Si me escuchas, la voz funciona' });
+});
+
+function textoAviso(ev, msFaltantes) {
+  const mins = Math.max(0, Math.round(msFaltantes / 60000));
+  const cuando = mins === 0 ? 'ahora' : mins >= 120 ? `en ${Math.round(mins / 60)} horas` : `en ${mins} minutos`;
+  return `${hhmm(ev.start_time)}${ev.location ? ' · ' + ev.location : ''} (${cuando})`;
+}
+
+// Mientras la página está abierta avisa por sí sola, aunque el push no llegue.
+function revisarRecordatorios() {
+  const ahora = new Date();
+  const hoy = parseYmd(ymd(ahora));
+  for (const ev of events) {
+    if (ev.remind_minutes < 0) continue;
+    for (const fecha of occurrences(ev, hoy, 1)) {
+      const falta = new Date(`${fecha}T${ev.start_time}`).getTime() - ahora.getTime();
+      if (falta > ev.remind_minutes * 60000 || falta <= -VENTANA_TRAS_INICIO_MS) continue;
+      lanzarAlerta(
+        { key: `${ev.id}:${fecha}`, title: ev.title, body: textoAviso(ev, falta) },
+        { notificarSistema: true },
+      );
+    }
+  }
+}
+
+setInterval(() => {
+  if (!user) return;
+  revisarRecordatorios();
+  renderAgenda(); // mantiene al día "EN CURSO" y "FINALIZADO"
+}, REVISION_MS);
+
+// El service worker avisa al recibir un push o al tocar la notificación.
+navigator.serviceWorker?.addEventListener('message', (e) => {
+  if (e.data?.type === 'reminder') lanzarAlerta(e.data);
+});
+
+// App abierta desde una notificación estando cerrada.
+{
+  const params = new URLSearchParams(location.search);
+  const key = params.get('alerta_key');
+  if (key) {
+    history.replaceState(null, '', location.pathname);
+    avisados.delete(key);
+    try { localStorage.removeItem(`aviso:${key}`); } catch { /* sin almacenamiento */ }
+    lanzarAlerta({ key, title: params.get('alerta_titulo') || 'Mi Agenda', body: params.get('alerta_texto') || '' });
+  }
+}
