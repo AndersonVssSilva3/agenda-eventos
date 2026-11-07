@@ -16,7 +16,8 @@ create table if not exists public.events (
   links jsonb not null default '[]',        -- ["https://..."]
   files jsonb not null default '[]',        -- [{name, path, type}]
   remind_minutes int not null default 30,   -- -1 = sin recordatorio
-  recurring_weekday int check (recurring_weekday between 0 and 6),  -- 0=domingo ... 6=sábado
+  recurring_weekday int check (recurring_weekday between 0 and 6),  -- primer día de repetición; 0=domingo ... 6=sábado
+  recurring_days int[],                     -- todos los días en que se repite
   created_at timestamptz not null default now()
 );
 create index if not exists events_user_date_idx on public.events (user_id, event_date);
@@ -35,8 +36,9 @@ create table if not exists public.push_subscriptions (
 create table if not exists public.reminders_sent (
   event_id uuid not null references public.events(id) on delete cascade,
   occurrence_date date not null,
+  stage text not null default 'aviso',      -- 'aviso' (antes) o 'inicio' (a la hora)
   sent_at timestamptz not null default now(),
-  primary key (event_id, occurrence_date)
+  primary key (event_id, occurrence_date, stage)
 );
 
 -- Seguridad: cada usuario solo ve lo suyo

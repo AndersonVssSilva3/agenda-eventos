@@ -138,6 +138,16 @@
       </div>
 
       <label class="check"><input type="checkbox" name="repeat"> 🔁 Se repite cada semana (ideal para clases)</label>
+      <div id="repeat-days" class="repeat-days hidden">
+        <label class="day-chip"><input type="checkbox" name="repeat_day" value="1"><span>L</span></label>
+        <label class="day-chip"><input type="checkbox" name="repeat_day" value="2"><span>M</span></label>
+        <label class="day-chip"><input type="checkbox" name="repeat_day" value="3"><span>X</span></label>
+        <label class="day-chip"><input type="checkbox" name="repeat_day" value="4"><span>J</span></label>
+        <label class="day-chip"><input type="checkbox" name="repeat_day" value="5"><span>V</span></label>
+        <label class="day-chip"><input type="checkbox" name="repeat_day" value="6"><span>S</span></label>
+        <label class="day-chip"><input type="checkbox" name="repeat_day" value="0"><span>D</span></label>
+        <button type="button" class="btn small ghost" id="btn-lun-vie">Lunes a viernes</button>
+      </div>
 
       <label>Lugar / aula
         <input name="lugar" placeholder="Opcional">

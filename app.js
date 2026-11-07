@@ -123,14 +123,29 @@ async function load() {
 }
 
 /* ---------- Ocurrencias (eventos únicos y semanales) ---------- */
+// Los eventos anteriores a recurring_days solo tienen recurring_weekday.
+function diasDe(ev) {
+  if (ev.recurring_days?.length) return ev.recurring_days;
+  return ev.recurring_weekday == null ? [] : [ev.recurring_weekday];
+}
+
+function textoDias(ev) {
+  const dias = diasDe(ev);
+  if (dias.length === 7) return 'todos los días';
+  const orden = [1, 2, 3, 4, 5, 6, 0].filter((d) => dias.includes(d));
+  if (orden.join() === '1,2,3,4,5') return 'lunes a viernes';
+  return orden.map((d) => DIAS[d].toLowerCase()).join(', ');
+}
+
 function occurrences(ev, from, days) {
   const start = parseYmd(ev.event_date);
   const end = addDays(from, days);
-  if (ev.recurring_weekday == null) return start >= from && start <= end ? [ymd(start)] : [];
+  const dias = diasDe(ev);
+  if (!dias.length) return start >= from && start <= end ? [ymd(start)] : [];
   const out = [];
   for (let i = 0; i <= days; i++) {
     const d = addDays(from, i);
-    if (d.getDay() === ev.recurring_weekday && d >= start) out.push(ymd(d));
+    if (dias.includes(d.getDay()) && d >= start) out.push(ymd(d));
   }
   return out;
 }
@@ -205,7 +220,7 @@ function cardHTML(ev, isTimeline = false, dateStr = ev.event_date) {
           ${statusLabel}
         </div>
         <div class="ev-title">${esc(ev.title)}</div>
-        <div class="ev-meta">🕒 ${esc(horas)} ${ev.recurring_weekday != null ? ' · 🔁 semanal' : ''}</div>
+        <div class="ev-meta">🕒 ${esc(horas)} ${diasDe(ev).length ? ` · 🔁 ${esc(textoDias(ev))}` : ''}</div>
         ${ev.location ? `<div class="ev-meta">📍 ${esc(ev.location)}</div>` : ''}
         ${ev.remind_minutes >= 0 ? `<div class="ev-meta">🔔 ${ev.remind_minutes === 0 ? 'A la hora' : ev.remind_minutes >= 1440 ? '1 día antes' : ev.remind_minutes + ' min antes'}</div>` : ''}
       </div>
@@ -314,14 +329,14 @@ function renderCalendar() {
 }
 
 function renderSchedule() {
-  const rec = events.filter((e) => e.recurring_weekday != null);
+  const rec = events.filter((e) => diasDe(e).length);
   if (!rec.length) {
     $('#schedule').innerHTML = '<div class="empty">Aún no tienes horario semanal.<br>Crea una clase o cita y marca “Se repite cada semana”.</div>';
     return;
   }
   let html = '';
   for (const wd of [1, 2, 3, 4, 5, 6, 0]) {
-    const list = rec.filter((e) => e.recurring_weekday === wd).sort((a, b) => a.start_time.localeCompare(b.start_time));
+    const list = rec.filter((e) => diasDe(e).includes(wd)).sort((a, b) => a.start_time.localeCompare(b.start_time));
     if (!list.length) continue;
     html += `<div class="sched-day"><h3 style="margin: 1rem 0 .5rem;">${DIAS[wd]}</h3>${list.map((e) => cardHTML(e)).join('')}</div>`;
   }
@@ -364,6 +379,20 @@ function renderExistingFiles() {
     `<span class="chip">📎 ${esc(f.name)} <button type="button" data-rm="${i}" title="Quitar">×</button></span>`).join('');
 }
 
+const casillasDia = () => [...form.querySelectorAll('input[name="repeat_day"]')];
+
+function marcarDias(dias) {
+  casillasDia().forEach((c) => { c.checked = dias.includes(Number(c.value)); });
+}
+
+function actualizarRepeticion() {
+  const repite = form.elements.repeat.checked;
+  $('#repeat-days').classList.toggle('hidden', !repite);
+  if (repite && !casillasDia().some((c) => c.checked) && form.elements.event_date.value) {
+    marcarDias([parseYmd(form.elements.event_date.value).getDay()]);
+  }
+}
+
 function openForm(ev = null) {
   form.reset();
   editingFiles = ev ? [...(ev.files || [])] : [];
@@ -378,13 +407,15 @@ function openForm(ev = null) {
     el.start_time.value = hhmm(ev.start_time);
     el.end_time.value = hhmm(ev.end_time);
     el.remind.value = String(ev.remind_minutes);
-    el.repeat.checked = ev.recurring_weekday != null;
+    el.repeat.checked = diasDe(ev).length > 0;
+    marcarDias(diasDe(ev));
     el.lugar.value = ev.location || '';
     el.notas.value = ev.notes || '';
     el.links.value = (ev.links || []).join('\n');
   } else {
     el.event_date.value = ymd(new Date());
   }
+  actualizarRepeticion();
   renderExistingFiles();
   dlg.showModal();
 }
@@ -400,7 +431,10 @@ $('#existing-files').addEventListener('click', (e) => {
 
 form.elements.kind.addEventListener('change', (e) => {
   if (e.target.value === 'clase') form.elements.repeat.checked = true;
+  actualizarRepeticion();
 });
+form.elements.repeat.addEventListener('change', actualizarRepeticion);
+$('#btn-lun-vie').addEventListener('click', () => marcarDias([1, 2, 3, 4, 5]));
 
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -409,6 +443,9 @@ form.addEventListener('submit', async (e) => {
   btn.disabled = true; btn.textContent = 'Guardando…';
 
   try {
+    const dias = el.repeat.checked ? casillasDia().filter((c) => c.checked).map((c) => Number(c.value)) : [];
+    if (el.repeat.checked && !dias.length) throw new Error('Elige al menos un día para repetir');
+
     const id = el.event_id.value || crypto.randomUUID();
     const files = [...editingFiles];
 
@@ -436,7 +473,8 @@ form.addEventListener('submit', async (e) => {
       links,
       files,
       remind_minutes: Number(el.remind.value),
-      recurring_weekday: el.repeat.checked ? parseYmd(el.event_date.value).getDay() : null,
+      recurring_days: dias.length ? dias : null,
+      recurring_weekday: dias.length ? dias[0] : null,
     };
 
     const { error } = await sb.from('events').upsert(row);
@@ -503,7 +541,7 @@ $('#btn-push').addEventListener('click', async () => {
     );
     if (error) throw error;
     toast('🔔 Notificaciones activadas en este dispositivo');
-    lanzarAlerta({ key: `activado:${Date.now()}`, title: 'Notificaciones activadas', body: 'Así sonarán tus recordatorios' });
+    lanzarAlerta({ key: `activado:${Date.now()}`, title: 'Notificaciones activadas', body: 'Listo, así te avisaré de tus recordatorios.' });
   } catch (err) {
     console.error(err);
     toast('No se pudo activar: ' + (err.message || err));
@@ -540,11 +578,14 @@ function prepararAudio() {
 }
 document.addEventListener('click', prepararAudio, { capture: true });
 
+const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Devuelve si llegó a sonar, para no tapar la voz con el tono.
 async function sonar() {
-  if (!audioCtx) return;
+  if (!audioCtx) return false;
   // Sin un toque previo resume() no termina nunca: se espera poco y se sigue sin sonido.
-  await Promise.race([audioCtx.resume(), new Promise((r) => setTimeout(r, 300))]);
-  if (audioCtx.state !== 'running') return;
+  await Promise.race([audioCtx.resume(), esperar(300)]);
+  if (audioCtx.state !== 'running') return false;
   [880, 1175, 880].forEach((freq, i) => {
     const inicio = audioCtx.currentTime + i * 0.28;
     const osc = audioCtx.createOscillator();
@@ -557,17 +598,58 @@ async function sonar() {
     osc.start(inicio);
     osc.stop(inicio + 0.26);
   });
+  return true;
 }
 
-function hablar(texto) {
+// La API de voz no indica el género: se reconoce por el nombre de la voz.
+const VOZ_MUJER = /helena|laura|sabina|dalia|elvira|paloma|salom[eé]|elena|camila|catalina|francisca|paola|m[oó]nica|paulina|marisol|soledad|ximena|lupe|mar[ií]a|female|mujer|google espa[nñ]ol/i;
+const VOZ_HOMBRE = /pablo|ra[uú]l|jorge|diego|juan|carlos|[aá]lvaro|gerardo|alex|tom[aá]s|enrique|andr[eé]s|\bmale\b|hombre/i;
+
+function elegirVozMujer() {
+  const voces = speechSynthesis.getVoices().filter((v) => v.lang?.toLowerCase().startsWith('es'));
+  const mujeres = voces.filter((v) => VOZ_MUJER.test(v.name) && !VOZ_HOMBRE.test(v.name));
+  return mujeres.find((v) => /natural|online/i.test(v.name))
+    ?? mujeres[0]
+    ?? voces.find((v) => !VOZ_HOMBRE.test(v.name))
+    ?? voces[0];
+}
+
+// El navegador carga las voces con retraso: sin esperar, usaría la voz por defecto.
+async function vocesListas() {
+  if (speechSynthesis.getVoices().length) return;
+  await Promise.race([
+    new Promise((r) => speechSynthesis.addEventListener('voiceschanged', r, { once: true })),
+    esperar(1000),
+  ]);
+}
+
+async function hablar(texto) {
   if (!('speechSynthesis' in window)) return;
-  speechSynthesis.cancel();
+  await vocesListas();
   const voz = new SpeechSynthesisUtterance(texto);
   voz.lang = 'es-ES';
-  const espanol = speechSynthesis.getVoices().find((v) => v.lang?.toLowerCase().startsWith('es'));
-  if (espanol) { voz.voice = espanol; voz.lang = espanol.lang; }
+  voz.rate = 0.95;
+  voz.pitch = 1.1;
+  const elegida = elegirVozMujer();
+  if (elegida) { voz.voice = elegida; voz.lang = elegida.lang; }
   speechSynthesis.speak(voz);
 }
+
+let turnoAnuncio = 0;
+
+async function anunciar(texto) {
+  const turno = turnoAnuncio; // solo callar() lo cambia; dos avisos seguidos se oyen en cola
+  vibrar();
+  if (await sonar()) await esperar(850);
+  if (turno === turnoAnuncio) await hablar(texto);
+}
+
+function callar() {
+  turnoAnuncio++;
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
+  navigator.vibrate?.(0);
+}
+if ('speechSynthesis' in window) speechSynthesis.getVoices();
 
 function vibrar() {
   // No existe en iPhone ni en la mayoría de PC: ahí simplemente no hace nada.
@@ -578,14 +660,12 @@ function lanzarAlerta({ key, title, body }, { notificarSistema = false } = {}) {
   if (yaAvisado(key)) return;
   marcarAvisado(key);
 
-  textoAlerta = `Recordatorio: ${title}. ${body}`;
+  textoAlerta = body;
   $('#alerta-titulo').textContent = title;
   $('#alerta-texto').textContent = body;
   if (!dlgAlerta.open) dlgAlerta.showModal();
 
-  sonar();
-  vibrar();
-  hablar(textoAlerta);
+  anunciar(textoAlerta);
 
   // Comparte etiqueta con el push: si llegan los dos, queda una sola notificación.
   if (notificarSistema && document.hidden && 'Notification' in window && Notification.permission === 'granted') {
@@ -603,25 +683,45 @@ function lanzarAlerta({ key, title, body }, { notificarSistema = false } = {}) {
 
 $('#alerta-escuchar').addEventListener('click', () => {
   prepararAudio();
-  sonar();
-  vibrar();
-  hablar(textoAlerta);
+  callar();
+  anunciar(textoAlerta);
 });
 $('#alerta-cerrar').addEventListener('click', () => {
-  if ('speechSynthesis' in window) speechSynthesis.cancel();
-  navigator.vibrate?.(0);
+  callar();
   dlgAlerta.close();
 });
 
 $('#btn-test-alert').addEventListener('click', () => {
   prepararAudio();
-  lanzarAlerta({ key: `prueba:${Date.now()}`, title: 'Prueba de alerta', body: 'Si me escuchas, la voz funciona' });
+  lanzarAlerta({ key: `prueba:${Date.now()}`, title: 'Prueba de alerta', body: 'Hola, si me escuchas, tus avisos por voz ya están funcionando.' });
 });
 
+// Mismos textos que en supabase/functions/send-reminders/index.ts
+function nombreEvento(ev) {
+  const titulo = ev.title.trim();
+  if (titulo.toLowerCase().startsWith(ev.kind)) return `tu ${titulo}`;
+  return ev.kind === 'clase' ? `tu clase de ${titulo}` : `tu ${ev.kind}: ${titulo}`;
+}
+
+function duracion(mins) {
+  const plural = (n, palabra) => `${n} ${palabra}${n === 1 ? '' : 's'}`;
+  if (mins >= 1440 && mins % 1440 === 0) return plural(mins / 1440, 'día');
+  const horas = Math.floor(mins / 60);
+  const resto = mins % 60;
+  if (!horas) return plural(resto, 'minuto');
+  return resto ? `${plural(horas, 'hora')} y ${plural(resto, 'minuto')}` : plural(horas, 'hora');
+}
+
 function textoAviso(ev, msFaltantes) {
-  const mins = Math.max(0, Math.round(msFaltantes / 60000));
-  const cuando = mins === 0 ? 'ahora' : mins >= 120 ? `en ${Math.round(mins / 60)} horas` : `en ${mins} minutos`;
-  return `${hhmm(ev.start_time)}${ev.location ? ' · ' + ev.location : ''} (${cuando})`;
+  const lugar = ev.location ? ` en ${ev.location}` : '';
+  const nombre = nombreEvento(ev);
+  return `Hola, te recuerdo con cariño que ${nombre} empieza en ${duracion(Math.ceil(msFaltantes / 60000))}, a las ${hhmm(ev.start_time)}${lugar}. Ve preparándote con calma.`;
+}
+
+function textoInicio(ev) {
+  const lugar = ev.location ? ` en ${ev.location}` : '';
+  const nombre = nombreEvento(ev);
+  return `¡Ya es la hora! ${nombre[0].toUpperCase()}${nombre.slice(1)} empieza ahora${lugar}. Que te vaya muy bien.`;
 }
 
 // Mientras la página está abierta avisa por sí sola, aunque el push no llegue.
@@ -633,8 +733,9 @@ function revisarRecordatorios() {
     for (const fecha of occurrences(ev, hoy, 1)) {
       const falta = new Date(`${fecha}T${ev.start_time}`).getTime() - ahora.getTime();
       if (falta > ev.remind_minutes * 60000 || falta <= -VENTANA_TRAS_INICIO_MS) continue;
+      const etapa = falta > 0 ? 'aviso' : 'inicio';
       lanzarAlerta(
-        { key: `${ev.id}:${fecha}`, title: ev.title, body: textoAviso(ev, falta) },
+        { key: `${ev.id}:${fecha}:${etapa}`, title: ev.title, body: etapa === 'aviso' ? textoAviso(ev, falta) : textoInicio(ev) },
         { notificarSistema: true },
       );
     }

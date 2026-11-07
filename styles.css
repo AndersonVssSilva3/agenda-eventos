@@ -202,6 +202,14 @@ dialog { width: min(540px,94vw); max-height: 90vh; border: none; border-radius: 
 dialog::backdrop { background: rgba(0,0,0,0.6); backdrop-filter: blur(5px); }
 .toast { position: fixed; left: 50%; bottom: 6rem; transform: translate(-50%,20px); background: #1e293b; color: #fff; padding: 0.8rem 1.2rem; border-radius: 14px; opacity: 0; pointer-events: none; transition: 0.3s; font-weight: 500; z-index: 50; box-shadow: 0 8px 24px rgba(0,0,0,0.3); }
 .toast.show { opacity: 1; transform: translate(-50%,0); }
+
+/* ===== DÍAS DE REPETICIÓN ===== */
+.repeat-days { display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem; }
+.day-chip { position: relative; cursor: pointer; }
+.day-chip input { position: absolute; inset: 0; width: 100%; height: 100%; margin: 0; opacity: 0; cursor: pointer; }
+.day-chip span { display: flex; align-items: center; justify-content: center; width: 38px; height: 38px; border-radius: 50%; border: 1px solid var(--line); color: var(--text); font-weight: 600; transition: 0.2s; }
+.day-chip input:checked + span { background: var(--primary); border-color: var(--primary); color: #fff; }
+.day-chip input:focus-visible + span { outline: 2px solid var(--primary); outline-offset: 2px; }
 /* ===== ESTADOS DE EVENTOS (EN CURSO / FINALIZADO) ===== */
 .ev.live {
   border: 2px solid var(--primary);

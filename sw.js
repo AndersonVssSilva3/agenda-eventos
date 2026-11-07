@@ -14,7 +14,7 @@ self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim(
 function datosRecordatorio(data) {
   const title = data.title || 'Mi Agenda';
   const body = data.body || 'Tienes un recordatorio';
-  const key = data.event_id && data.date ? `${data.event_id}:${data.date}` : `${title}:${body}`;
+  const key = data.event_id && data.date ? `${data.event_id}:${data.date}:${data.stage}` : `${title}:${body}`;
   return { type: 'reminder', key, title, body };
 }
 
