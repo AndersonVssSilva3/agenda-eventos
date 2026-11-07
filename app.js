@@ -104,6 +104,7 @@ sb.auth.onAuthStateChange((_evt, session) => {
   $('#view-auth').classList.toggle('hidden', !!user);
   $('#view-app').classList.toggle('hidden', !user);
   if (user) load();
+  else nativo?.programar({ alarmas: [] }).catch(console.error); // al salir, el celular deja de avisar
 });
 
 /* ---------- Carga de datos ---------- */
@@ -112,6 +113,7 @@ async function load() {
   if (error) return toast('Error al cargar: ' + error.message);
   events = data;
   revisarRecordatorios();
+  sincronizarAlarmasNativas();
 
   const paths = events.flatMap((ev) => (ev.files || []).map((f) => f.path));
   urlMap = {};
@@ -517,6 +519,10 @@ function urlB64ToUint8Array(b64) {
 
 $('#btn-push').addEventListener('click', async () => {
   try {
+    if (nativo) {
+      await nativo.pedirPermisos();
+      return toast('🔔 Los avisos por voz están activos en este celular');
+    }
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
       return toast('Este navegador no soporta push. En iPhone: Compartir → Añadir a pantalla de inicio.');
     }
@@ -549,6 +555,8 @@ $('#btn-push').addEventListener('click', async () => {
 });
 
 /* ---------- Alertas: voz, sonido y vibración ---------- */
+// En la app de Android la voz y la vibración las pone el celular (funcionan bloqueado).
+const nativo = window.Capacitor?.isNativePlatform?.() ? window.Capacitor.Plugins.AlarmasNativas : null;
 const VIBRACION = [500, 200, 500, 200, 500, 200, 500];
 const REVISION_MS = 30000;
 const VENTANA_TRAS_INICIO_MS = 5 * 60000; // igual que la función send-reminders
@@ -638,6 +646,7 @@ async function hablar(texto) {
 let turnoAnuncio = 0;
 
 async function anunciar(texto) {
+  if (nativo) return; // la alarma del celular ya lo está diciendo
   const turno = turnoAnuncio; // solo callar() lo cambia; dos avisos seguidos se oyen en cola
   vibrar();
   if (await sonar()) await esperar(850);
@@ -668,7 +677,7 @@ function lanzarAlerta({ key, title, body }, { notificarSistema = false } = {}) {
   anunciar(textoAlerta);
 
   // Comparte etiqueta con el push: si llegan los dos, queda una sola notificación.
-  if (notificarSistema && document.hidden && 'Notification' in window && Notification.permission === 'granted') {
+  if (!nativo && notificarSistema && document.hidden && 'Notification' in window && Notification.permission === 'granted') {
     navigator.serviceWorker?.ready.then((reg) => reg.showNotification(title, {
       body,
       icon: './icon-192.png',
@@ -682,6 +691,7 @@ function lanzarAlerta({ key, title, body }, { notificarSistema = false } = {}) {
 }
 
 $('#alerta-escuchar').addEventListener('click', () => {
+  if (nativo) return nativo.decir({ texto: textoAlerta }).catch(console.error);
   prepararAudio();
   callar();
   anunciar(textoAlerta);
@@ -693,7 +703,9 @@ $('#alerta-cerrar').addEventListener('click', () => {
 
 $('#btn-test-alert').addEventListener('click', () => {
   prepararAudio();
-  lanzarAlerta({ key: `prueba:${Date.now()}`, title: 'Prueba de alerta', body: 'Hola, si me escuchas, tus avisos por voz ya están funcionando.' });
+  const body = 'Hola, si me escuchas, tus avisos por voz ya están funcionando.';
+  lanzarAlerta({ key: `prueba:${Date.now()}`, title: 'Prueba de alerta', body });
+  nativo?.decir({ texto: body }).catch(console.error);
 });
 
 // Mismos textos que en supabase/functions/send-reminders/index.ts
@@ -741,6 +753,37 @@ function revisarRecordatorios() {
     }
   }
 }
+
+// Le pasa al celular los avisos próximos, para que suenen aunque la app esté cerrada.
+function sincronizarAlarmasNativas() {
+  if (!nativo) return;
+  const ahora = Date.now();
+  const hoy = parseYmd(ymd(new Date()));
+  const alarmas = [];
+  for (const ev of events) {
+    if (ev.remind_minutes < 0) continue;
+    for (const fecha of occurrences(ev, hoy, HORIZONTE_DIAS)) {
+      const inicio = new Date(`${fecha}T${ev.start_time}`).getTime();
+      if (ev.remind_minutes > 0) {
+        alarmas.push({ id: `${ev.id}:${fecha}:aviso`, at: inicio - ev.remind_minutes * 60000, title: ev.title, text: textoAviso(ev, ev.remind_minutes * 60000) });
+      }
+      alarmas.push({ id: `${ev.id}:${fecha}:inicio`, at: inicio, title: ev.title, text: textoInicio(ev) });
+    }
+  }
+  nativo.programar({ alarmas: alarmas.filter((a) => a.at > ahora) }).catch(console.error);
+
+  try {
+    if (localStorage.getItem('permisos-pedidos') !== '1') {
+      localStorage.setItem('permisos-pedidos', '1');
+      nativo.pedirPermisos().catch(console.error);
+    }
+  } catch { /* sin almacenamiento: se pueden pedir con el botón 🔔 */ }
+}
+
+// Al volver a la app, trae lo que se haya cambiado desde la PC.
+document.addEventListener('visibilitychange', () => {
+  if (nativo && user && !document.hidden) load();
+});
 
 setInterval(() => {
   if (!user) return;

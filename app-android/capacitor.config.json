@@ -1,0 +1,6 @@
+{
+  "appId": "com.miagenda.app",
+  "appName": "Mi Agenda",
+  "webDir": "www",
+  "server": { "url": "https://andersonvsssilva3.github.io/agenda-eventos/", "cleartext": false }
+}
