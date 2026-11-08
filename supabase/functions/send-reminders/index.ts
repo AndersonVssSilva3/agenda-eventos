@@ -76,9 +76,10 @@ Deno.serve(async (req) => {
       if (!subs?.length) continue;
 
       const mins = Math.max(0, Math.round(diff / 60000));
-      const body = `${String(ev.start_time).slice(0, 5)}${ev.location ? " · " + ev.location : ""}` +
-        (mins > 0 ? ` (en ${mins >= 120 ? Math.round(mins / 60) + " h" : mins + " min"})` : " (ahora)");
-      const payload = JSON.stringify({ title: ev.title, body, url: "./", tag: `${ev.id}-${day.date}` });
+      const cuando = mins > 0 ? `en ${mins >= 120 ? Math.round(mins / 60) + " h" : mins + " min"}` : "ahora";
+      const body = `Tienes ${ev.title} a las ${String(ev.start_time).slice(0, 5)}` +
+        `${ev.location ? " en " + ev.location : ""} (${cuando})`;
+      const payload = JSON.stringify({ title: "Hola 👋", body, url: "./", tag: `${ev.id}-${day.date}` });
 
       let ok = 0;
       for (const s of subs) {

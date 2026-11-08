@@ -572,7 +572,7 @@ if ('serviceWorker' in navigator) {
   navigator.serviceWorker.addEventListener('message', (e) => {
     if (e.data?.type !== 'reminder') return;
     alertar();
-    toast(`🔔 ${e.data.title}: ${e.data.body}`);
+    toast(`🔔 ${e.data.body}`);
   });
 }
 
@@ -609,8 +609,8 @@ $('#btn-push').addEventListener('click', async () => {
     );
     if (error) throw error;
     // Notificación de prueba: así sabes si tu teléfono suena/vibra
-    await reg.showNotification('🔔 Prueba de Mi Agenda', {
-      body: 'Así llegarán tus recordatorios. Si no sonó ni vibró, revisa los ajustes de notificación del teléfono.',
+    await reg.showNotification('Hola 👋', {
+      body: 'Así te avisaré: Tienes Clase a las 10:30 en Aula 5 (en 10 min)',
       icon: './icon-192.png',
       badge: './icon-192.png',
       vibrate: VIBRACION,
