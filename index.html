@@ -42,6 +42,7 @@
       </div>
       <div class="row">
         <button id="btn-theme" class="icon-btn" title="Cambiar tema">🌙</button>
+        <button id="btn-test-alert" class="icon-btn" title="Probar voz, sonido y vibración">🔊</button>
         <button id="btn-push" class="icon-btn" title="Activar notificaciones">🔔</button>
         <button id="btn-logout" class="icon-btn" title="Salir">⎋</button>
       </div>
@@ -102,7 +103,10 @@
   <!-- FORMULARIO -->
   <dialog id="dlg" class="glass">
     <form id="event-form" class="stack">
-      <h2 id="dlg-title">Nuevo evento</h2>
+      <div class="dlg-head">
+        <h2 id="dlg-title">Nuevo evento</h2>
+        <button type="button" class="icon-btn" id="btn-close" title="Cerrar" aria-label="Cerrar">✕</button>
+      </div>
       <input type="hidden" name="event_id">
 
       <label>Tipo
@@ -117,33 +121,28 @@
         <input name="titulo" required placeholder="Ej: Concierto, Cálculo II, Dentista">
       </label>
 
-      <label>Frecuencia
-        <select name="freq">
-          <option value="once">📌 Solo un día</option>
-          <option value="daily">📆 Todos los días (rango de fechas)</option>
-          <option value="weekly">🔁 Ciertos días de la semana</option>
-        </select>
-      </label>
-
-      <div class="grid2">
-        <label><span id="lbl-start">Fecha</span> <input type="date" name="event_date" required></label>
-        <label id="wrap-end" class="hidden">Hasta (opcional) <input type="date" name="end_date"></label>
-      </div>
-
-      <div id="wrap-days" class="hidden">
-        <div class="muted" style="font-size:.85rem;font-weight:500;margin-bottom:.4rem">Días</div>
-        <div class="daypicker">
-          <label class="day"><input type="checkbox" name="wd" value="1"><span>L</span></label>
-          <label class="day"><input type="checkbox" name="wd" value="2"><span>M</span></label>
-          <label class="day"><input type="checkbox" name="wd" value="3"><span>X</span></label>
-          <label class="day"><input type="checkbox" name="wd" value="4"><span>J</span></label>
-          <label class="day"><input type="checkbox" name="wd" value="5"><span>V</span></label>
-          <label class="day"><input type="checkbox" name="wd" value="6"><span>S</span></label>
-          <label class="day"><input type="checkbox" name="wd" value="0"><span>D</span></label>
+      <div class="campo-fechas">
+        <span id="fechas-label" class="campo-label">Fechas</span>
+        <button type="button" class="fechas-btn" id="fechas-btn" aria-expanded="false" aria-labelledby="fechas-label fechas-resumen">
+          <span id="fechas-resumen"></span><span aria-hidden="true">📅</span>
+        </button>
+        <div id="fechas-panel" class="fechas-panel hidden">
+          <p id="fechas-ayuda" class="field-hint"></p>
+          <div class="fechas-mes">
+            <button type="button" class="icon-btn" id="fechas-prev" aria-label="Mes anterior">‹</button>
+            <strong id="fechas-mes-titulo"></strong>
+            <button type="button" class="icon-btn" id="fechas-next" aria-label="Mes siguiente">›</button>
+          </div>
+          <div class="weekdays">
+            <span>L</span><span>M</span><span>X</span><span>J</span><span>V</span><span>S</span><span>D</span>
+          </div>
+          <div id="fechas-cal" class="calendar fechas-cal"></div>
+          <div class="row end">
+            <button type="button" class="btn small ghost" id="fechas-limpiar">Limpiar</button>
+            <button type="button" class="btn small primary" id="fechas-listo">Listo</button>
+          </div>
         </div>
       </div>
-      <p id="freq-hint" class="muted hidden" style="margin:0;font-size:.8rem"></p>
-
       <div class="grid2">
         <label>Hora inicio <input type="time" name="start_time" required></label>
         <label>Hora fin <input type="time" name="end_time"></label>
@@ -160,13 +159,25 @@
         </select>
       </label>
 
+      <label class="check"><input type="checkbox" name="repeat"> 🔁 Se repite cada semana (ideal para clases)</label>
+      <div id="repeat-days" class="repeat-days hidden">
+        <label class="day-chip"><input type="checkbox" name="repeat_day" value="1"><span>L</span></label>
+        <label class="day-chip"><input type="checkbox" name="repeat_day" value="2"><span>M</span></label>
+        <label class="day-chip"><input type="checkbox" name="repeat_day" value="3"><span>X</span></label>
+        <label class="day-chip"><input type="checkbox" name="repeat_day" value="4"><span>J</span></label>
+        <label class="day-chip"><input type="checkbox" name="repeat_day" value="5"><span>V</span></label>
+        <label class="day-chip"><input type="checkbox" name="repeat_day" value="6"><span>S</span></label>
+        <label class="day-chip"><input type="checkbox" name="repeat_day" value="0"><span>D</span></label>
+        <button type="button" class="btn small ghost" id="btn-lun-vie">Lunes a viernes</button>
+      </div>
+
       <label>Lugar / aula
         <input name="lugar" placeholder="Opcional">
       </label>
       <label>Notas
         <textarea name="notas" rows="3" placeholder="Opcional"></textarea>
       </label>
-      <label>Links (uno por línea)
+      <label>Links (uno por línea; Zoom, Meet y Teams abren su app en Android)
         <textarea name="links" rows="3" placeholder="https://..."></textarea>
       </label>
 
@@ -180,6 +191,18 @@
         <button class="btn primary" id="btn-save">Guardar</button>
       </div>
     </form>
+  </dialog>
+
+  <!-- ALERTA DE RECORDATORIO -->
+  <dialog id="dlg-alerta" class="glass">
+    <div class="stack">
+      <h2>🔔 <span id="alerta-titulo"></span></h2>
+      <p id="alerta-texto"></p>
+      <div class="row end">
+        <button type="button" class="btn ghost" id="alerta-escuchar">🔊 Escuchar</button>
+        <button type="button" class="btn primary" id="alerta-cerrar">Entendido</button>
+      </div>
+    </div>
   </dialog>
 
   <div id="toast" class="toast"></div>

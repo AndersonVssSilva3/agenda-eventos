@@ -104,6 +104,7 @@ sb.auth.onAuthStateChange((_evt, session) => {
   $('#view-auth').classList.toggle('hidden', !!user);
   $('#view-app').classList.toggle('hidden', !user);
   if (user) load();
+  else nativo?.programar({ alarmas: [] }).catch(console.error); // al salir, el celular deja de avisar
 });
 
 /* ---------- Carga de datos ---------- */
@@ -111,6 +112,8 @@ async function load() {
   const { data, error } = await sb.from('events').select('*').order('event_date').order('start_time');
   if (error) return toast('Error al cargar: ' + error.message);
   events = data;
+  revisarRecordatorios();
+  sincronizarAlarmasNativas();
 
   const paths = events.flatMap((ev) => (ev.files || []).map((f) => f.path));
   urlMap = {};
@@ -121,35 +124,43 @@ async function load() {
   render();
 }
 
-/* ---------- Ocurrencias (un día, rango diario o días de la semana) ---------- */
-const DIAS_CORTO = ['D', 'L', 'M', 'X', 'J', 'V', 'S'];
-const TODOS_LOS_DIAS = [0, 1, 2, 3, 4, 5, 6];
-
-// Días de la semana en que se repite (null = no se repite por día de semana)
-function evWeekdays(ev) {
-  if (Array.isArray(ev.weekdays) && ev.weekdays.length) return ev.weekdays;
-  if (ev.recurring_weekday != null) return [ev.recurring_weekday]; // formato antiguo
-  return null;
-}
-const isRecurring = (ev) => evWeekdays(ev) != null || !!ev.end_date;
-
-function occursOn(ev, dateStr) {
-  if (dateStr < ev.event_date) return false;
-  if (ev.end_date && dateStr > ev.end_date) return false;
-  const wds = evWeekdays(ev);
-  if (wds) return wds.includes(parseYmd(dateStr).getDay());
-  if (ev.end_date) return true;          // rango sin días elegidos = todos los días
-  return dateStr === ev.event_date;      // evento de un solo día
+/* ---------- Ocurrencias (eventos únicos y semanales) ---------- */
+// Los eventos anteriores a recurring_days solo tienen recurring_weekday.
+function diasDe(ev) {
+  if (ev.recurring_days?.length) return ev.recurring_days;
+  return ev.recurring_weekday == null ? [] : [ev.recurring_weekday];
 }
 
-const fmtCorto = (s) => parseYmd(s).toLocaleDateString('es', { day: 'numeric', month: 'short' });
+function textoDias(ev) {
+  const dias = diasDe(ev);
+  if (dias.length === 7) return 'todos los días';
+  const orden = [1, 2, 3, 4, 5, 6, 0].filter((d) => dias.includes(d));
+  if (orden.join() === '1,2,3,4,5') return 'lunes a viernes';
+  return orden.map((d) => DIAS[d].toLowerCase()).join(', ');
+}
 
-function recurrenceLabel(ev) {
-  const wds = evWeekdays(ev);
-  const hasta = ev.end_date ? ` · hasta ${fmtCorto(ev.end_date)}` : '';
-  if (!wds) return ev.end_date ? `📆 ${fmtCorto(ev.event_date)} → ${fmtCorto(ev.end_date)}` : '';
-  if (wds.length === 7) return `🔁 Todos los días${hasta}`;
-  return `🔁 ${[1, 2, 3, 4, 5, 6, 0].filter((d) => wds.includes(d)).map((d) => DIAS_CORTO[d]).join(' ')}${hasta}`;
+function resumenFechas(fechas) {
+  const corta = (s) => parseYmd(s).toLocaleDateString('es', { day: 'numeric', month: 'short' });
+  if (fechas.length <= 3) return fechas.map(corta).join(', ');
+  return `${fechas.slice(0, 2).map(corta).join(', ')} y ${fechas.length - 2} más`;
+}
+
+function occurrences(ev, from, days) {
+  const start = parseYmd(ev.event_date);
+  const end = addDays(from, days);
+  if (ev.specific_dates?.length) {
+    const desde = ymd(from);
+    const hasta = ymd(end);
+    return ev.specific_dates.filter((f) => f >= desde && f <= hasta);
+  }
+  const dias = diasDe(ev);
+  if (!dias.length) return start >= from && start <= end ? [ymd(start)] : [];
+  const out = [];
+  for (let i = 0; i <= days; i++) {
+    const d = addDays(from, i);
+    if (dias.includes(d.getDay()) && d >= start) out.push(ymd(d));
+  }
+  return out;
 }
 
 function passesFilter(ev) {
@@ -174,10 +185,12 @@ function labelDia(dateStr) {
 }
 
 function eventsOn(dateStr) {
-  return events.filter(passesFilter).filter((ev) => occursOn(ev, dateStr)).sort((a, b) => a.start_time.localeCompare(b.start_time));
+  return events.filter(passesFilter).filter((ev) =>
+    occurrences(ev, parseYmd(dateStr), 0).includes(dateStr)
+  ).sort((a, b) => a.start_time.localeCompare(b.start_time));
 }
 
-function cardHTML(ev, dateStr = null) {
+function cardHTML(ev, isTimeline = false, dateStr = ev.event_date) {
   const files = ev.files || [];
   const imgs = files.filter((f) => f.type?.startsWith('image/') && urlMap[f.path]);
   const docs = files.filter((f) => !(f.type?.startsWith('image/')) && urlMap[f.path]);
@@ -190,7 +203,8 @@ function cardHTML(ev, dateStr = null) {
   const todayStr = ymd(now);
   
   // Solo calculamos el estado si estamos en la vista de Hoy
-  if (dateStr) {
+  if (isTimeline) {
+    // Se usa la fecha de la ocurrencia: en las clases semanales, event_date es solo el primer día.
     const start = new Date(`${dateStr}T${ev.start_time}`);
     let end;
     if (ev.end_time) {
@@ -198,7 +212,7 @@ function cardHTML(ev, dateStr = null) {
     } else {
       end = new Date(start.getTime() + 60 * 60 * 1000); // Si no hay fin, asume 1 hora
     }
-    
+
     if (dateStr === todayStr) {
       if (now >= start && now <= end) {
         statusClass = 'live';
@@ -219,14 +233,13 @@ function cardHTML(ev, dateStr = null) {
           ${statusLabel}
         </div>
         <div class="ev-title">${esc(ev.title)}</div>
-        <div class="ev-meta">🕒 ${esc(horas)}</div>
-        ${isRecurring(ev) ? `<div class="ev-meta">${esc(recurrenceLabel(ev))}</div>` : ''}
+        <div class="ev-meta">🕒 ${esc(horas)} ${diasDe(ev).length ? ` · 🔁 ${esc(textoDias(ev))}` : ''}${ev.specific_dates?.length ? ` · 📅 ${esc(resumenFechas(ev.specific_dates))}` : ''}</div>
         ${ev.location ? `<div class="ev-meta">📍 ${esc(ev.location)}</div>` : ''}
         ${ev.remind_minutes >= 0 ? `<div class="ev-meta">🔔 ${ev.remind_minutes === 0 ? 'A la hora' : ev.remind_minutes >= 1440 ? '1 día antes' : ev.remind_minutes + ' min antes'}</div>` : ''}
       </div>
     </div>
     ${ev.notes ? `<p class="ev-notes">${esc(ev.notes)}</p>` : ''}
-    ${(ev.links || []).length ? `<div class="chips">${ev.links.map((l) => `<a class="chip" href="${esc(l)}" target="_blank" rel="noopener">🔗 ${esc(l.replace(/^https?:\/\//, '').slice(0, 32))}</a>`).join('')}</div>` : ''}
+    ${(ev.links || []).length ? `<div class="chips">${ev.links.map((l) => `<a class="chip" href="${esc(l)}" target="_blank" rel="noopener" data-enlace>🔗 ${esc(l.replace(/^https?:\/\//, '').slice(0, 32))}</a>`).join('')}</div>` : ''}
     ${imgs.length ? `<div class="thumbs">${imgs.map((f) => `<a href="${urlMap[f.path]}" target="_blank" rel="noopener"><img src="${urlMap[f.path]}" alt="${esc(f.name)}" loading="lazy"></a>`).join('')}</div>` : ''}
     ${docs.length ? `<div class="chips">${docs.map((f) => `<a class="chip" href="${urlMap[f.path]}" target="_blank" rel="noopener">📎 ${esc(f.name)}</a>`).join('')}</div>` : ''}
     <div class="ev-actions">
@@ -245,7 +258,7 @@ function timelineHTML(dateStr) {
     html += `
       <div class="tl-item">
         <div class="tl-time">${hhmm(ev.start_time)}${dur ? `<small>${dur}</small>` : ''}</div>
-        <div>${cardHTML(ev, dateStr)}</div>
+        <div>${cardHTML(ev, true, dateStr)}</div>
       </div>`;
   }
   return html;
@@ -281,16 +294,12 @@ function renderAgenda() {
   $('#agenda-list').innerHTML = html || '<div class="empty">Sin eventos próximos.</div>';
 }
 
-function renderCalendar() {
-  const y = mesActual.getFullYear();
-  const m = mesActual.getMonth();
-  $('#month-title').textContent = mesActual.toLocaleDateString('es', { month: 'long', year: 'numeric' });
-
+// Días que se muestran en la cuadrícula de un mes, de lunes a domingo.
+function celdasMes(y, m) {
   const first = new Date(y, m, 1);
   const startDow = (first.getDay() + 6) % 7; // lunes=0
   const daysInMonth = new Date(y, m + 1, 0).getDate();
   const prevDays = new Date(y, m, 0).getDate();
-  const today = ymd(new Date());
 
   const cells = [];
   for (let i = startDow - 1; i >= 0; i--) {
@@ -305,8 +314,14 @@ function renderCalendar() {
     const d = new Date(y, m + 1, cells.length - startDow - daysInMonth + 1);
     cells.push({ date: ymd(d), other: true, num: d.getDate() });
   }
+  return cells;
+}
 
-  const html = cells.map((c) => {
+function renderCalendar() {
+  $('#month-title').textContent = mesActual.toLocaleDateString('es', { month: 'long', year: 'numeric' });
+  const today = ymd(new Date());
+
+  const html = celdasMes(mesActual.getFullYear(), mesActual.getMonth()).map((c) => {
     const evs = eventsOn(c.date);
     const tipos = [...new Set(evs.map((e) => e.kind))];
     const cls = ['cal-day'];
@@ -329,15 +344,14 @@ function renderCalendar() {
 }
 
 function renderSchedule() {
-  const hoy = ymd(new Date());
-  const rec = events.filter((e) => isRecurring(e) && (!e.end_date || e.end_date >= hoy));
+  const rec = events.filter((e) => diasDe(e).length);
   if (!rec.length) {
-    $('#schedule').innerHTML = '<div class="empty">Aún no tienes horario.<br>Crea una clase o cita y elige “Todos los días” o “Ciertos días de la semana”.</div>';
+    $('#schedule').innerHTML = '<div class="empty">Aún no tienes horario semanal.<br>Crea una clase o cita y marca “Se repite cada semana”.</div>';
     return;
   }
   let html = '';
   for (const wd of [1, 2, 3, 4, 5, 6, 0]) {
-    const list = rec.filter((e) => (evWeekdays(e) || TODOS_LOS_DIAS).includes(wd)).sort((a, b) => a.start_time.localeCompare(b.start_time));
+    const list = rec.filter((e) => diasDe(e).includes(wd)).sort((a, b) => a.start_time.localeCompare(b.start_time));
     if (!list.length) continue;
     html += `<div class="sched-day"><h3 style="margin: 1rem 0 .5rem;">${DIAS[wd]}</h3>${list.map((e) => cardHTML(e)).join('')}</div>`;
   }
@@ -380,26 +394,66 @@ function renderExistingFiles() {
     `<span class="chip">📎 ${esc(f.name)} <button type="button" data-rm="${i}" title="Quitar">×</button></span>`).join('');
 }
 
-function wdBoxes() { return [...form.querySelectorAll('input[name="wd"]')]; }
+const casillasDia = () => [...form.querySelectorAll('input[name="repeat_day"]')];
 
-function updateFreqUI() {
-  const el = form.elements;
-  const freq = el.freq.value;
-  $('#wrap-end').classList.toggle('hidden', freq === 'once');
-  $('#wrap-days').classList.toggle('hidden', freq !== 'weekly');
-  $('#lbl-start').textContent = freq === 'once' ? 'Fecha' : 'Desde';
-  // Al elegir "ciertos días", marca por defecto el día de la fecha de inicio
-  if (freq === 'weekly' && !wdBoxes().some((b) => b.checked) && el.event_date.value) {
-    const d = String(parseYmd(el.event_date.value).getDay());
-    wdBoxes().forEach((b) => { b.checked = b.value === d; });
-  }
-  el.end_date.min = el.event_date.value || '';
-  const hint = $('#freq-hint');
-  hint.classList.toggle('hidden', freq === 'once');
-  hint.textContent = freq === 'daily'
-    ? 'Se repetirá cada día a la misma hora entre las dos fechas. Sin fecha “Hasta”, se repite siempre.'
-    : 'Se repetirá en los días marcados. Sin fecha “Hasta”, se repite siempre.';
+function marcarDias(dias) {
+  casillasDia().forEach((c) => { c.checked = dias.includes(Number(c.value)); });
 }
+
+function actualizarRepeticion() {
+  const repite = form.elements.repeat.checked;
+  $('#repeat-days').classList.toggle('hidden', !repite);
+  // Lo que se repite cada semana solo necesita el día en que empieza.
+  if (repite) fechasElegidas = fechasElegidas.slice(0, 1);
+  if (repite && !casillasDia().some((c) => c.checked) && fechasElegidas.length) {
+    marcarDias([parseYmd(fechasElegidas[0]).getDay()]);
+  }
+  renderFechas();
+}
+
+/* ---------- Calendario de fechas del formulario ---------- */
+let fechasElegidas = [];
+let mesFechas = new Date();
+
+function renderFechas() {
+  const repite = form.elements.repeat.checked;
+  const hoy = ymd(new Date());
+  $('#fechas-label').textContent = repite ? 'Fecha de inicio' : 'Fechas';
+  $('#fechas-ayuda').textContent = repite
+    ? 'Elige el día en que empieza a repetirse.'
+    : 'Toca cada día que quieras; tócalo otra vez para quitarlo. Todos tendrán el mismo horario.';
+  $('#fechas-resumen').textContent = fechasElegidas.length ? resumenFechas(fechasElegidas) : 'Elegir fecha';
+  $('#fechas-mes-titulo').textContent = mesFechas.toLocaleDateString('es', { month: 'long', year: 'numeric' });
+  $('#fechas-cal').innerHTML = celdasMes(mesFechas.getFullYear(), mesFechas.getMonth()).map((c) => {
+    const elegido = fechasElegidas.includes(c.date);
+    const cls = ['cal-day', c.other && 'other', c.date === hoy && 'today', elegido && 'elegido'].filter(Boolean).join(' ');
+    return `<button type="button" class="${cls}" data-fecha="${c.date}" aria-pressed="${elegido}">${c.num}</button>`;
+  }).join('');
+}
+
+function abrirFechas(abierto) {
+  $('#fechas-panel').classList.toggle('hidden', !abierto);
+  $('#fechas-btn').setAttribute('aria-expanded', String(abierto));
+}
+
+function cambiarMesFechas(delta) {
+  mesFechas = new Date(mesFechas.getFullYear(), mesFechas.getMonth() + delta, 1);
+  renderFechas();
+}
+
+$('#fechas-btn').addEventListener('click', () => abrirFechas($('#fechas-panel').classList.contains('hidden')));
+$('#fechas-listo').addEventListener('click', () => abrirFechas(false));
+$('#fechas-prev').addEventListener('click', () => cambiarMesFechas(-1));
+$('#fechas-next').addEventListener('click', () => cambiarMesFechas(1));
+$('#fechas-limpiar').addEventListener('click', () => { fechasElegidas = []; renderFechas(); });
+$('#fechas-cal').addEventListener('click', (e) => {
+  const fecha = e.target.dataset.fecha;
+  if (!fecha) return;
+  if (form.elements.repeat.checked) fechasElegidas = [fecha];
+  else if (fechasElegidas.includes(fecha)) fechasElegidas = fechasElegidas.filter((f) => f !== fecha);
+  else fechasElegidas = [...fechasElegidas, fecha].sort();
+  renderFechas();
+});
 
 function openForm(ev = null) {
   form.reset();
@@ -411,26 +465,27 @@ function openForm(ev = null) {
   if (ev) {
     el.kind.value = ev.kind;
     el.titulo.value = ev.title;
-    el.event_date.value = ev.event_date;
+    fechasElegidas = ev.specific_dates?.length ? [...ev.specific_dates] : [ev.event_date];
     el.start_time.value = hhmm(ev.start_time);
     el.end_time.value = hhmm(ev.end_time);
     el.remind.value = String(ev.remind_minutes);
-    const wds = evWeekdays(ev);
-    el.freq.value = wds ? (wds.length === 7 ? 'daily' : 'weekly') : (ev.end_date ? 'daily' : 'once');
-    el.end_date.value = ev.end_date || '';
-    wdBoxes().forEach((b) => { b.checked = !!wds?.includes(Number(b.value)); });
+    el.repeat.checked = diasDe(ev).length > 0;
+    marcarDias(diasDe(ev));
     el.lugar.value = ev.location || '';
     el.notas.value = ev.notes || '';
     el.links.value = (ev.links || []).join('\n');
   } else {
-    el.event_date.value = ymd(new Date());
+    fechasElegidas = [ymd(new Date())];
   }
-  updateFreqUI();
+  mesFechas = fechasElegidas.length ? parseYmd(fechasElegidas[0]) : new Date();
+  abrirFechas(false);
+  actualizarRepeticion();
   renderExistingFiles();
   dlg.showModal();
 }
 
 $('#btn-cancel').addEventListener('click', () => dlg.close());
+$('#btn-close').addEventListener('click', () => dlg.close());
 $('#existing-files').addEventListener('click', (e) => {
   const i = e.target.dataset.rm;
   if (i === undefined) return;
@@ -439,32 +494,23 @@ $('#existing-files').addEventListener('click', (e) => {
   renderExistingFiles();
 });
 
-form.elements.kind.addEventListener('change', (e) => {
-  if (e.target.value === 'clase' && form.elements.freq.value === 'once') {
-    form.elements.freq.value = 'weekly';
-    updateFreqUI();
-  }
-});
-form.elements.freq.addEventListener('change', updateFreqUI);
-form.elements.event_date.addEventListener('change', updateFreqUI);
+form.elements.repeat.addEventListener('change', actualizarRepeticion);
+$('#btn-lun-vie').addEventListener('click', () => marcarDias([1, 2, 3, 4, 5]));
 
 form.addEventListener('submit', async (e) => {
   e.preventDefault();
   const el = form.elements;
-  const freq = el.freq.value;
-  const endDate = freq === 'once' ? null : (el.end_date.value || null);
-  let weekdays = null;
-  if (freq === 'daily') weekdays = TODOS_LOS_DIAS;
-  if (freq === 'weekly') {
-    weekdays = wdBoxes().filter((b) => b.checked).map((b) => Number(b.value)).sort();
-    if (!weekdays.length) return toast('Marca al menos un día de la semana');
-  }
-  if (endDate && endDate < el.event_date.value) return toast('La fecha “Hasta” debe ser igual o posterior a la de inicio');
-
   const btn = $('#btn-save');
   btn.disabled = true; btn.textContent = 'Guardando…';
 
   try {
+    if (!fechasElegidas.length) {
+      abrirFechas(true);
+      throw new Error('Elige al menos una fecha');
+    }
+    const dias = el.repeat.checked ? casillasDia().filter((c) => c.checked).map((c) => Number(c.value)) : [];
+    if (el.repeat.checked && !dias.length) throw new Error('Elige al menos un día para repetir');
+
     const id = el.event_id.value || crypto.randomUUID();
     const files = [...editingFiles];
 
@@ -484,7 +530,8 @@ form.addEventListener('submit', async (e) => {
       user_id: user.id,
       kind: el.kind.value,
       title: el.titulo.value.trim(),
-      event_date: el.event_date.value,
+      event_date: fechasElegidas[0],
+      specific_dates: fechasElegidas.length > 1 ? fechasElegidas : null,
       start_time: el.start_time.value,
       end_time: el.end_time.value || null,
       location: el.lugar.value.trim() || null,
@@ -492,9 +539,8 @@ form.addEventListener('submit', async (e) => {
       links,
       files,
       remind_minutes: Number(el.remind.value),
-      end_date: endDate,
-      weekdays,
-      recurring_weekday: null, // reemplazado por "weekdays"
+      recurring_days: dias.length ? dias : null,
+      recurring_weekday: dias.length ? dias[0] : null,
     };
 
     const { error } = await sb.from('events').upsert(row);
@@ -518,7 +564,8 @@ document.addEventListener('click', async (e) => {
   if (editId) return openForm(events.find((x) => x.id === editId));
   if (delId) {
     const ev = events.find((x) => x.id === delId);
-    if (!confirm(`¿Eliminar "${ev.title}"?` + (isRecurring(ev) ? '\nSe borrarán todas sus repeticiones.' : ''))) return;
+    const variasFechas = ev.recurring_weekday != null || ev.specific_dates?.length;
+    if (!confirm(`¿Eliminar "${ev.title}"?` + (variasFechas ? '\nSe borrarán todas sus fechas.' : ''))) return;
     const paths = (ev.files || []).map((f) => f.path);
     if (paths.length) await sb.storage.from(BUCKET).remove(paths);
     const { error } = await sb.from('events').delete().eq('id', delId);
@@ -528,53 +575,29 @@ document.addEventListener('click', async (e) => {
   }
 });
 
-/* ---------- Sonido y vibración ---------- */
-const VIBRACION = [500, 200, 500, 200, 500, 200, 500];
-let audioCtx = null;
+/* ---------- Enlaces que abren la app instalada ---------- */
+const APPS_REUNION = [
+  { hosts: /(^|\.)zoom\.us$/i, paquete: 'us.zoom.videomeetings' },
+  { hosts: /^meet\.google\.com$/i, paquete: 'com.google.android.apps.tachyon' },
+  { hosts: /^teams\.(microsoft|live)\.com$/i, paquete: 'com.microsoft.teams' },
+];
 
-// El navegador solo deja reproducir audio después de que tocas la pantalla
-function unlockAudio() {
-  try {
-    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
-    if (audioCtx.state === 'suspended') audioCtx.resume();
-  } catch { /* sin audio */ }
-}
-document.addEventListener('pointerdown', unlockAudio, { once: true });
+document.addEventListener('click', (e) => {
+  const a = e.target.closest?.('a[data-enlace]');
+  if (!a) return;
+  const url = new URL(a.href);
+  const paquete = APPS_REUNION.find((app) => app.hosts.test(url.hostname))?.paquete;
 
-function playChime() {
-  try {
-    unlockAudio();
-    if (!audioCtx) return;
-    const t0 = audioCtx.currentTime;
-    [880, 1175, 880, 1175].forEach((freq, i) => {
-      const osc = audioCtx.createOscillator();
-      const gain = audioCtx.createGain();
-      osc.type = 'sine';
-      osc.frequency.value = freq;
-      const t = t0 + i * 0.35;
-      gain.gain.setValueAtTime(0.0001, t);
-      gain.gain.exponentialRampToValueAtTime(0.4, t + 0.02);
-      gain.gain.exponentialRampToValueAtTime(0.0001, t + 0.3);
-      osc.connect(gain).connect(audioCtx.destination);
-      osc.start(t);
-      osc.stop(t + 0.32);
-    });
-  } catch { /* sin audio */ }
-}
-
-function alertar() {
-  playChime();
-  try { navigator.vibrate?.(VIBRACION); } catch { /* sin vibración */ }
-}
-
-// Si la app está abierta cuando llega un recordatorio, suena y vibra aquí también
-if ('serviceWorker' in navigator) {
-  navigator.serviceWorker.addEventListener('message', (e) => {
-    if (e.data?.type !== 'reminder') return;
-    alertar();
-    toast(`🔔 ${e.data.body}`);
-  });
-}
+  if (nativo) {
+    e.preventDefault();
+    nativo.abrirEnlace({ url: url.href, paquete }).catch(() => window.open(url.href, '_blank'));
+  } else if (paquete && /android/i.test(navigator.userAgent)) {
+    // Chrome abre la app si está instalada y, si no, sigue el enlace normal.
+    e.preventDefault();
+    location.href = `intent://${url.host}${url.pathname}${url.search}#Intent;scheme=https;package=${paquete};`
+      + `S.browser_fallback_url=${encodeURIComponent(url.href)};end`;
+  }
+});
 
 /* ---------- Notificaciones push ---------- */
 function urlB64ToUint8Array(b64) {
@@ -585,6 +608,10 @@ function urlB64ToUint8Array(b64) {
 
 $('#btn-push').addEventListener('click', async () => {
   try {
+    if (nativo) {
+      await nativo.pedirPermisos();
+      return toast('🔔 Los avisos por voz están activos en este celular');
+    }
     if (!('serviceWorker' in navigator) || !('PushManager' in window)) {
       return toast('Este navegador no soporta push. En iPhone: Compartir → Añadir a pantalla de inicio.');
     }
@@ -608,20 +635,264 @@ $('#btn-push').addEventListener('click', async () => {
       { onConflict: 'endpoint' }
     );
     if (error) throw error;
-    // Notificación de prueba: así sabes si tu teléfono suena/vibra
-    await reg.showNotification('Hola 👋', {
-      body: 'Así te avisaré: Tienes Clase a las 10:30 en Aula 5 (en 10 min)',
-      icon: './icon-192.png',
-      badge: './icon-192.png',
-      vibrate: VIBRACION,
-      silent: false,
-      tag: 'prueba',
-      renotify: true,
-    });
-    alertar();
-    toast('🔔 Notificaciones activadas. Te envié una de prueba.');
+    toast('🔔 Notificaciones activadas en este dispositivo');
+    lanzarAlerta({ key: `activado:${Date.now()}`, title: 'Notificaciones activadas', body: 'Listo, así te avisaré de tus recordatorios.' });
   } catch (err) {
     console.error(err);
     toast('No se pudo activar: ' + (err.message || err));
   }
 });
+
+/* ---------- Alertas: voz, sonido y vibración ---------- */
+// En la app de Android la voz y la vibración las pone el celular (funcionan bloqueado).
+const nativo = window.Capacitor?.isNativePlatform?.() ? window.Capacitor.Plugins.AlarmasNativas : null;
+const VIBRACION = [500, 200, 500, 200, 500, 200, 500];
+const REVISION_MS = 30000;
+const VENTANA_TRAS_INICIO_MS = 5 * 60000; // igual que la función send-reminders
+const avisados = new Set();
+const dlgAlerta = $('#dlg-alerta');
+let audioCtx = null;
+let textoAlerta = '';
+
+function yaAvisado(key) {
+  if (avisados.has(key)) return true;
+  try { return localStorage.getItem(`aviso:${key}`) === '1'; } catch { return false; }
+}
+
+function marcarAvisado(key) {
+  avisados.add(key);
+  try { localStorage.setItem(`aviso:${key}`, '1'); } catch { /* sin almacenamiento: basta la memoria */ }
+}
+
+// Los navegadores exigen un toque previo para permitir audio: se prepara en el primero.
+function prepararAudio() {
+  try {
+    audioCtx ??= new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === 'suspended') audioCtx.resume();
+  } catch (err) {
+    console.warn('Audio no disponible', err);
+  }
+}
+document.addEventListener('click', prepararAudio, { capture: true });
+
+const esperar = (ms) => new Promise((r) => setTimeout(r, ms));
+
+// Devuelve si llegó a sonar, para no tapar la voz con el tono.
+async function sonar() {
+  if (!audioCtx) return false;
+  // Sin un toque previo resume() no termina nunca: se espera poco y se sigue sin sonido.
+  await Promise.race([audioCtx.resume(), esperar(300)]);
+  if (audioCtx.state !== 'running') return false;
+  [880, 1175, 880].forEach((freq, i) => {
+    const inicio = audioCtx.currentTime + i * 0.28;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.0001, inicio);
+    gain.gain.exponentialRampToValueAtTime(0.4, inicio + 0.03);
+    gain.gain.exponentialRampToValueAtTime(0.0001, inicio + 0.25);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(inicio);
+    osc.stop(inicio + 0.26);
+  });
+  return true;
+}
+
+// La API de voz no indica el género: se reconoce por el nombre de la voz.
+const VOZ_MUJER = /helena|laura|sabina|dalia|elvira|paloma|salom[eé]|elena|camila|catalina|francisca|paola|m[oó]nica|paulina|marisol|soledad|ximena|lupe|mar[ií]a|female|mujer|google espa[nñ]ol/i;
+const VOZ_HOMBRE = /pablo|ra[uú]l|jorge|diego|juan|carlos|[aá]lvaro|gerardo|alex|tom[aá]s|enrique|andr[eé]s|\bmale\b|hombre/i;
+
+function elegirVozMujer() {
+  const voces = speechSynthesis.getVoices().filter((v) => v.lang?.toLowerCase().startsWith('es'));
+  const mujeres = voces.filter((v) => VOZ_MUJER.test(v.name) && !VOZ_HOMBRE.test(v.name));
+  return mujeres.find((v) => /natural|online/i.test(v.name))
+    ?? mujeres[0]
+    ?? voces.find((v) => !VOZ_HOMBRE.test(v.name))
+    ?? voces[0];
+}
+
+// El navegador carga las voces con retraso: sin esperar, usaría la voz por defecto.
+async function vocesListas() {
+  if (speechSynthesis.getVoices().length) return;
+  await Promise.race([
+    new Promise((r) => speechSynthesis.addEventListener('voiceschanged', r, { once: true })),
+    esperar(1000),
+  ]);
+}
+
+async function hablar(texto) {
+  if (!('speechSynthesis' in window)) return;
+  await vocesListas();
+  const voz = new SpeechSynthesisUtterance(texto);
+  voz.lang = 'es-ES';
+  voz.rate = 0.95;
+  voz.pitch = 1.1;
+  const elegida = elegirVozMujer();
+  if (elegida) { voz.voice = elegida; voz.lang = elegida.lang; }
+  speechSynthesis.speak(voz);
+}
+
+let turnoAnuncio = 0;
+
+async function anunciar(texto) {
+  if (nativo) return; // la alarma del celular ya lo está diciendo
+  const turno = turnoAnuncio; // solo callar() lo cambia; dos avisos seguidos se oyen en cola
+  vibrar();
+  if (await sonar()) await esperar(850);
+  if (turno === turnoAnuncio) await hablar(texto);
+}
+
+function callar() {
+  turnoAnuncio++;
+  if ('speechSynthesis' in window) speechSynthesis.cancel();
+  navigator.vibrate?.(0);
+}
+if ('speechSynthesis' in window) speechSynthesis.getVoices();
+
+function vibrar() {
+  // No existe en iPhone ni en la mayoría de PC: ahí simplemente no hace nada.
+  try { navigator.vibrate?.(VIBRACION); } catch { /* sin soporte */ }
+}
+
+function lanzarAlerta({ key, title, body }, { notificarSistema = false } = {}) {
+  if (yaAvisado(key)) return;
+  marcarAvisado(key);
+
+  textoAlerta = body;
+  $('#alerta-titulo').textContent = title;
+  $('#alerta-texto').textContent = body;
+  if (!dlgAlerta.open) dlgAlerta.showModal();
+
+  anunciar(textoAlerta);
+
+  // Comparte etiqueta con el push: si llegan los dos, queda una sola notificación.
+  if (!nativo && notificarSistema && document.hidden && 'Notification' in window && Notification.permission === 'granted') {
+    navigator.serviceWorker?.ready.then((reg) => reg.showNotification(title, {
+      body,
+      icon: './icon-192.png',
+      badge: './icon-192.png',
+      vibrate: VIBRACION,
+      tag: key,
+      requireInteraction: true,
+      data: { type: 'reminder', key, title, body },
+    })).catch(console.error);
+  }
+}
+
+$('#alerta-escuchar').addEventListener('click', () => {
+  if (nativo) return nativo.decir({ texto: textoAlerta }).catch(console.error);
+  prepararAudio();
+  callar();
+  anunciar(textoAlerta);
+});
+$('#alerta-cerrar').addEventListener('click', () => {
+  callar();
+  dlgAlerta.close();
+});
+
+$('#btn-test-alert').addEventListener('click', () => {
+  prepararAudio();
+  const body = 'Hola. Los avisos por voz funcionan.';
+  lanzarAlerta({ key: `prueba:${Date.now()}`, title: 'Prueba de alerta', body });
+  nativo?.decir({ texto: body }).catch(console.error);
+});
+
+// Mismos textos que en supabase/functions/send-reminders/index.ts
+function nombreEvento(ev) {
+  const titulo = ev.title.trim();
+  if (titulo.toLowerCase().startsWith(ev.kind)) return titulo;
+  return ev.kind === 'clase' ? `clase de ${titulo}` : titulo;
+}
+
+function duracion(mins) {
+  const plural = (n, palabra) => `${n} ${palabra}${n === 1 ? '' : 's'}`;
+  if (mins >= 1440 && mins % 1440 === 0) return plural(mins / 1440, 'día');
+  const horas = Math.floor(mins / 60);
+  const resto = mins % 60;
+  if (!horas) return plural(resto, 'minuto');
+  return resto ? `${plural(horas, 'hora')} y ${plural(resto, 'minuto')}` : plural(horas, 'hora');
+}
+
+function textoAviso(ev, msFaltantes) {
+  const lugar = ev.location ? ` en ${ev.location}` : '';
+  const nombre = nombreEvento(ev);
+  return `Hola. Tienes ${nombre} a las ${hhmm(ev.start_time)}${lugar}, en ${duracion(Math.ceil(msFaltantes / 60000))}.`;
+}
+
+function textoInicio(ev) {
+  const lugar = ev.location ? ` en ${ev.location}` : '';
+  const nombre = nombreEvento(ev);
+  return `Hola. Ya empieza ${nombre}${lugar}.`;
+}
+
+// Mientras la página está abierta avisa por sí sola, aunque el push no llegue.
+function revisarRecordatorios() {
+  const ahora = new Date();
+  const hoy = parseYmd(ymd(ahora));
+  for (const ev of events) {
+    if (ev.remind_minutes < 0) continue;
+    for (const fecha of occurrences(ev, hoy, 1)) {
+      const falta = new Date(`${fecha}T${ev.start_time}`).getTime() - ahora.getTime();
+      if (falta > ev.remind_minutes * 60000 || falta <= -VENTANA_TRAS_INICIO_MS) continue;
+      const etapa = falta > 0 ? 'aviso' : 'inicio';
+      lanzarAlerta(
+        { key: `${ev.id}:${fecha}:${etapa}`, title: ev.title, body: etapa === 'aviso' ? textoAviso(ev, falta) : textoInicio(ev) },
+        { notificarSistema: true },
+      );
+    }
+  }
+}
+
+// Le pasa al celular los avisos próximos, para que suenen aunque la app esté cerrada.
+function sincronizarAlarmasNativas() {
+  if (!nativo) return;
+  const ahora = Date.now();
+  const hoy = parseYmd(ymd(new Date()));
+  const alarmas = [];
+  for (const ev of events) {
+    if (ev.remind_minutes < 0) continue;
+    for (const fecha of occurrences(ev, hoy, HORIZONTE_DIAS)) {
+      const inicio = new Date(`${fecha}T${ev.start_time}`).getTime();
+      if (ev.remind_minutes > 0) {
+        alarmas.push({ id: `${ev.id}:${fecha}:aviso`, at: inicio - ev.remind_minutes * 60000, title: ev.title, text: textoAviso(ev, ev.remind_minutes * 60000) });
+      }
+      alarmas.push({ id: `${ev.id}:${fecha}:inicio`, at: inicio, title: ev.title, text: textoInicio(ev) });
+    }
+  }
+  nativo.programar({ alarmas: alarmas.filter((a) => a.at > ahora) }).catch(console.error);
+
+  try {
+    if (localStorage.getItem('permisos-pedidos') !== '1') {
+      localStorage.setItem('permisos-pedidos', '1');
+      nativo.pedirPermisos().catch(console.error);
+    }
+  } catch { /* sin almacenamiento: se pueden pedir con el botón 🔔 */ }
+}
+
+// Al volver a la app, trae lo que se haya cambiado desde la PC.
+document.addEventListener('visibilitychange', () => {
+  if (nativo && user && !document.hidden) load();
+});
+
+setInterval(() => {
+  if (!user) return;
+  revisarRecordatorios();
+  renderAgenda(); // mantiene al día "EN CURSO" y "FINALIZADO"
+}, REVISION_MS);
+
+// El service worker avisa al recibir un push o al tocar la notificación.
+navigator.serviceWorker?.addEventListener('message', (e) => {
+  if (e.data?.type === 'reminder') lanzarAlerta(e.data);
+});
+
+// App abierta desde una notificación estando cerrada.
+{
+  const params = new URLSearchParams(location.search);
+  const key = params.get('alerta_key');
+  if (key) {
+    history.replaceState(null, '', location.pathname);
+    avisados.delete(key);
+    try { localStorage.removeItem(`aviso:${key}`); } catch { /* sin almacenamiento */ }
+    lanzarAlerta({ key, title: params.get('alerta_titulo') || 'Mi Agenda', body: params.get('alerta_texto') || '' });
+  }
+}

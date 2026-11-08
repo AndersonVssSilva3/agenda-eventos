@@ -16,15 +16,11 @@ create table if not exists public.events (
   links jsonb not null default '[]',        -- ["https://..."]
   files jsonb not null default '[]',        -- [{name, path, type}]
   remind_minutes int not null default 30,   -- -1 = sin recordatorio
-  recurring_weekday int check (recurring_weekday between 0 and 6),  -- (antiguo) 0=domingo ... 6=sábado
-  end_date date,                            -- último día del rango (null = un solo día o sin fin)
-  weekdays smallint[],                      -- días en que se repite: {0..6}; {0,1,2,3,4,5,6} = todos los días
+  recurring_weekday int check (recurring_weekday between 0 and 6),  -- primer día de repetición; 0=domingo ... 6=sábado
+  recurring_days int[],                     -- todos los días en que se repite
+  specific_dates date[],                    -- fechas sueltas elegidas en el calendario, en orden
   created_at timestamptz not null default now()
 );
--- Columnas nuevas (por si la tabla ya existía de antes)
-alter table public.events add column if not exists end_date date;
-alter table public.events add column if not exists weekdays smallint[];
-
 create index if not exists events_user_date_idx on public.events (user_id, event_date);
 
 -- Dispositivos suscritos a notificaciones
@@ -41,8 +37,9 @@ create table if not exists public.push_subscriptions (
 create table if not exists public.reminders_sent (
   event_id uuid not null references public.events(id) on delete cascade,
   occurrence_date date not null,
+  stage text not null default 'aviso',      -- 'aviso' (antes) o 'inicio' (a la hora)
   sent_at timestamptz not null default now(),
-  primary key (event_id, occurrence_date)
+  primary key (event_id, occurrence_date, stage)
 );
 
 -- Seguridad: cada usuario solo ve lo suyo
@@ -50,26 +47,26 @@ alter table public.events enable row level security;
 alter table public.push_subscriptions enable row level security;
 alter table public.reminders_sent enable row level security;
 
-drop policy if exists "events: dueño" on public.events;
 create policy "events: dueño" on public.events
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 
-drop policy if exists "push: dueño" on public.push_subscriptions;
 create policy "push: dueño" on public.push_subscriptions
   for all using (auth.uid() = user_id) with check (auth.uid() = user_id);
 -- reminders_sent: sin políticas → solo la función de servidor puede usarla
+
+-- Supabase ya no da acceso automático a tablas nuevas (desde el 30-oct-2026)
+grant select, insert, update, delete on public.events to authenticated, service_role;
+grant select, insert, update, delete on public.push_subscriptions to authenticated, service_role;
+grant select, insert, update, delete on public.reminders_sent to service_role;
 
 -- Almacenamiento privado para fotos y archivos
 insert into storage.buckets (id, name, public)
 values ('event-files', 'event-files', false)
 on conflict (id) do nothing;
 
-drop policy if exists "files: ver los míos" on storage.objects;
 create policy "files: ver los míos" on storage.objects
   for select using (bucket_id = 'event-files' and (storage.foldername(name))[1] = auth.uid()::text);
-drop policy if exists "files: subir a mi carpeta" on storage.objects;
 create policy "files: subir a mi carpeta" on storage.objects
   for insert with check (bucket_id = 'event-files' and (storage.foldername(name))[1] = auth.uid()::text);
-drop policy if exists "files: borrar los míos" on storage.objects;
 create policy "files: borrar los míos" on storage.objects
   for delete using (bucket_id = 'event-files' and (storage.foldername(name))[1] = auth.uid()::text);

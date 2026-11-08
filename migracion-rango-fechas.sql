@@ -1,0 +1,2 @@
+-- OBSOLETO: no lo ejecutes. El campo "Hasta" se reemplazó por el calendario.
+-- Usa migracion-dias-y-avisos.sql. Puedes borrar este archivo.
