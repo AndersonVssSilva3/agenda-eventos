@@ -792,7 +792,7 @@ $('#alerta-cerrar').addEventListener('click', () => {
 
 $('#btn-test-alert').addEventListener('click', () => {
   prepararAudio();
-  const body = 'Hola, si me escuchas, tus avisos por voz ya están funcionando.';
+  const body = 'Hola. Los avisos por voz funcionan.';
   lanzarAlerta({ key: `prueba:${Date.now()}`, title: 'Prueba de alerta', body });
   nativo?.decir({ texto: body }).catch(console.error);
 });
@@ -800,8 +800,8 @@ $('#btn-test-alert').addEventListener('click', () => {
 // Mismos textos que en supabase/functions/send-reminders/index.ts
 function nombreEvento(ev) {
   const titulo = ev.title.trim();
-  if (titulo.toLowerCase().startsWith(ev.kind)) return `tu ${titulo}`;
-  return ev.kind === 'clase' ? `tu clase de ${titulo}` : `tu ${ev.kind}: ${titulo}`;
+  if (titulo.toLowerCase().startsWith(ev.kind)) return titulo;
+  return ev.kind === 'clase' ? `clase de ${titulo}` : titulo;
 }
 
 function duracion(mins) {
@@ -816,13 +816,13 @@ function duracion(mins) {
 function textoAviso(ev, msFaltantes) {
   const lugar = ev.location ? ` en ${ev.location}` : '';
   const nombre = nombreEvento(ev);
-  return `Hola, te recuerdo con cariño que ${nombre} empieza en ${duracion(Math.ceil(msFaltantes / 60000))}, a las ${hhmm(ev.start_time)}${lugar}. Ve preparándote con calma.`;
+  return `Hola. Tienes ${nombre} a las ${hhmm(ev.start_time)}${lugar}, en ${duracion(Math.ceil(msFaltantes / 60000))}.`;
 }
 
 function textoInicio(ev) {
   const lugar = ev.location ? ` en ${ev.location}` : '';
   const nombre = nombreEvento(ev);
-  return `¡Ya es la hora! ${nombre[0].toUpperCase()}${nombre.slice(1)} empieza ahora${lugar}. Que te vaya muy bien.`;
+  return `Hola. Ya empieza ${nombre}${lugar}.`;
 }
 
 // Mientras la página está abierta avisa por sí sola, aunque el push no llegue.

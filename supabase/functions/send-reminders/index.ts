@@ -34,8 +34,8 @@ function diasDe(ev: any): number[] {
 // Mismos textos que en app.js
 function nombreEvento(ev: any) {
   const titulo = String(ev.title).trim();
-  if (titulo.toLowerCase().startsWith(ev.kind)) return `tu ${titulo}`;
-  return ev.kind === "clase" ? `tu clase de ${titulo}` : `tu ${ev.kind}: ${titulo}`;
+  if (titulo.toLowerCase().startsWith(ev.kind)) return titulo;
+  return ev.kind === "clase" ? `clase de ${titulo}` : titulo;
 }
 
 function duracion(mins: number) {
@@ -50,13 +50,13 @@ function duracion(mins: number) {
 function textoAviso(ev: any, msFaltantes: number) {
   const lugar = ev.location ? ` en ${ev.location}` : "";
   const hora = String(ev.start_time).slice(0, 5);
-  return `Hola, te recuerdo con cariño que ${nombreEvento(ev)} empieza en ${duracion(Math.ceil(msFaltantes / 60000))}, a las ${hora}${lugar}. Ve preparándote con calma.`;
+  return `Hola. Tienes ${nombreEvento(ev)} a las ${hora}${lugar}, en ${duracion(Math.ceil(msFaltantes / 60000))}.`;
 }
 
 function textoInicio(ev: any) {
   const lugar = ev.location ? ` en ${ev.location}` : "";
   const nombre = nombreEvento(ev);
-  return `¡Ya es la hora! ${nombre[0].toUpperCase()}${nombre.slice(1)} empieza ahora${lugar}. Que te vaya muy bien.`;
+  return `Hola. Ya empieza ${nombre}${lugar}.`;
 }
 
 Deno.serve(async (req) => {
